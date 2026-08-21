@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CueClear — Music Rights Clearance</title>
+  <meta name="description" content="Turn locked-picture timelines into broadcast music cue sheets. Parallel Search + Extract, Gemini grounding, dual-sided split audit.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/studio.css">
+</head>
+<body class="studio-body">
+
+  <header class="swiss-telemetry-topbar">
+    <div class="topbar-col">
+      <div class="telemetry-row">
+        <span class="telemetry-label">PRODUCT:</span>
+        <span class="telemetry-val">CUECLEAR</span>
+      </div>
+      <div class="telemetry-row">
+        <span class="telemetry-label">STATUS:</span>
+        <span class="telemetry-val" id="topbarStatusVal">READY</span>
+      </div>
+    </div>
+
+    <div class="topbar-col">
+      <div class="telemetry-row">
+        <span class="telemetry-label">GEMINI:</span>
+        <span class="telemetry-val" id="healthGemini">CHECKING…</span>
+      </div>
+      <div class="telemetry-row">
+        <span class="telemetry-label">PARALLEL:</span>
+        <span class="telemetry-val" id="healthParallel">CHECKING…</span>
+      </div>
+    </div>
+
+    <div class="topbar-col topbar-actions">
+      <div class="export-menu-container">
+        <button class="btn-export-trigger" id="btnExportMenu" type="button" disabled title="Run clearance before exporting">
+          EXPORT CUE SHEET
+        </button>
+        <div class="export-menu-popup" id="exportMenuPopup">
+          <a href="/api/export/excel" class="export-menu-link" download id="exportExcel">
+            <strong>Excel (.xlsx)</strong>
+            <small>Broadcast / PMA cue sheet</small>
+          </a>
+          <a href="/api/export/cisac-xml" class="export-menu-link" download id="exportCisac">
+            <strong>CISAC XML (.xml)</strong>
+            <small>International cue delivery</small>
+          </a>
+          <a href="/api/export/json" class="export-menu-link" download id="exportJson">
+            <strong>Clearance JSON (.json)</strong>
+            <small>Full audit manifest</small>
+          </a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="swiss-hero-matrix" id="hero">
+    <div class="hero-left-col">
+      <div class="hero-brand-lockup">
+        <span class="brand-clapper" aria-hidden="true" title="Film slate">
+          <svg class="brand-clapper-svg" viewBox="0 0 48 44" role="img" focusable="false">
+            <!-- slate body -->
+            <rect x="3" y="15" width="42" height="26" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+            <!-- hinged clap stick -->
+            <polygon points="5,15 11,3 37,3 43,15" fill="#000000"/>
+            <!-- stick stripe cuts -->
+            <polygon points="13,3 17,15 21,15 17,3" fill="#ffffff"/>
+            <polygon points="23,3 27,15 31,15 27,3" fill="#ffffff"/>
+            <!-- slate field lines -->
+            <line x1="9" y1="24" x2="39" y2="24" stroke="#000000" stroke-width="1.5"/>
+            <line x1="9" y1="32" x2="39" y2="32" stroke="#000000" stroke-width="1.5"/>
+          </svg>
+        </span>
+        <h1 class="hero-master-wordmark">
+          CUE<br>CLEAR.
+        </h1>
+      </div>
+      <div class="hero-left-footer">
+        <span class="tag-inverted-black">MUSIC RIGHTS CLEARANCE</span>
+      </div>
+    </div>
+
+    <div class="hero-right-col">
+      <p class="hero-manifesto-text">
+        Upload a locked-picture timeline. CueClear finds music cues, looks up PRO rights with Parallel, grounds writer and publisher shares with Gemini, and exports a broadcast cue sheet.
+      </p>
+      <div class="hero-sublabel">
+        EDL / XML IN → CLEARED CUE SHEET OUT
+      </div>
+    </div>
+  </section>
+
+  <div class="hero-sub-bar">
+    <div>FILTER CUE RESULTS</div>
+    <div class="filter-pills-row">
+      <button class="filter-btn active" data-filter="all" type="button">All</button>
+      <button class="filter-btn" data-filter="cleared" type="button">Cleared</button>
+      <button class="filter-btn" data-filter="pending" type="button">Pending sign-off</button>
+      <button class="filter-btn" data-filter="partial" type="button">Needs action</button>
+      <button class="filter-btn" data-filter="live" type="button">Live Parallel</button>
+    </div>
+  </div>
+
+  <main class="workspace-grid" id="workspace">
+    <div class="workspace-card left">
+      <div class="card-header-bar">
+        <span>1. Upload timeline</span>
+        <span id="activeTimelineLabel">No file loaded</span>
+      </div>
+
+      <div class="card-body">
+        <div class="reel-selectors-row">
+          <button class="btn-reel-select" id="btnReelTrailer" data-reel="sample_trailer" type="button">
+            Sample: Trailer EDL
+          </button>
+          <button class="btn-reel-select" id="btnReelIndie" data-reel="sample_indie" type="button">
+            Sample: Indie XML
+          </button>
+          <button class="btn-reel-select active" id="btnReelMixed" data-reel="sample_mixed" type="button">
+            Sample: Mixed clearance
+          </button>
+          <button class="btn-reel-select" id="btnReelCustom" type="button">
+            Upload your file
+          </button>
+        </div>
+
+        <div class="technical-dropzone" id="technicalDropzone" role="button" tabindex="0" aria-label="Upload timeline file">
+          <div class="dropzone-label">Drop an EDL or XML timeline here, or click to browse</div>
+          <div class="dropzone-sub">Supports CMX 3600 (.edl) and Premiere / Final Cut (.xml)</div>
+          <input type="file" id="fileInput" accept=".edl,.xml,.txt" style="display: none;">
+        </div>
+
+        <div class="metadata-strip">
+          <div class="meta-cell">
+            <span class="meta-key">AUDIO CUES</span>
+            <span class="meta-val" id="valClipCount">—</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-key">FRAME RATE</span>
+            <span class="meta-val" id="valFps">—</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-key">SEQUENCE END</span>
+            <span class="meta-val" id="valDuration">—</span>
+          </div>
+        </div>
+
+        <button class="btn-swiss-primary" id="btnResolveRights" type="button" disabled>
+          Run rights clearance
+        </button>
+        <p class="helper-note" id="resolveHelper">Load a timeline first.</p>
+      </div>
+    </div>
+
+    <div class="workspace-card right">
+      <div class="card-header-bar">
+        <span>2. Clearance activity</span>
+        <span id="agentTelemetryPill" class="tag-inverted-black">IDLE</span>
+      </div>
+
+      <div class="swiss-terminal-body" id="terminalFeed">
+        <div class="term-line term-sys">Checking service status…</div>
+      </div>
+    </div>
+  </main>
+
+  <section class="master-table-section" id="matrix">
+    <div class="table-top-bar">
+      <div>
+        <h3>Cue sheet</h3>
+        <span class="font-mono" style="font-size: 11px; color: var(--swiss-gray-mid);">
+          Compliance: <strong id="matrixComplianceScore" style="color: var(--swiss-black);">—</strong>
+          · Showing <span id="displayedCount">0</span> / <span id="totalCount">0</span> cues
+        </span>
+      </div>
+      <div>
+        <input type="search" id="matrixSearchInput" class="table-search-input" placeholder="Search titles, writers, publishers, work IDs" autocomplete="off">
+      </div>
+    </div>
+
+    <div style="overflow-x: auto;">
+      <table class="swiss-matrix-table">
+        <thead>
+          <tr>
+            <th>Cue</th>
+            <th>Title &amp; artist</th>
+            <th>Usage</th>
+            <th>In / Out</th>
+            <th>Duration</th>
+            <th>Writers</th>
+            <th>Writer %</th>
+            <th>Publishers</th>
+            <th>Pub %</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="matrixTableBody">
+          <tr>
+            <td colspan="11" class="empty-state-cell">
+              Load a timeline, then run rights clearance to build your cue sheet.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="swiss-modal-overlay" id="splitModalOverlay">
+    <div class="swiss-modal-window" role="dialog" aria-modal="true" aria-labelledby="modalHeaderTitle">
+      <div class="swiss-modal-header">
+        <span id="modalHeaderTitle">Cue details</span>
+        <button class="modal-close-trigger" id="modalCloseBtn" type="button">Close</button>
+      </div>
+      <div class="swiss-modal-body" id="modalBodyContent"></div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

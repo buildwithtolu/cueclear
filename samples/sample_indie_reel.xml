@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+  <sequence>
+    <name>Indie_Reel_Sequence_v2</name>
+    <rate>
+      <timebase>24</timebase>
+      <ntsc>FALSE</ntsc>
+    </rate>
+    <media>
+      <audio>
+        <track>
+          <clipitem id="clipitem-1">
+            <name>Ludovico Einaudi - Nuvole Bianche.wav</name>
+            <start>240</start>
+            <end>2400</end>
+            <in>0</in>
+            <out>2160</out>
+            <file id="file-1">
+              <name>Ludovico_Einaudi_Nuvole_Bianche.wav</name>
+              <pathurl>file://localhost/Media/Audio/Nuvole_Bianche.wav</pathurl>
+            </file>
+          </clipitem>
+          <clipitem id="clipitem-2">
+            <name>Radiohead - Exit Music For A Film.wav</name>
+            <start>2450</start>
+            <end>4850</end>
+            <in>100</in>
+            <out>2500</out>
+            <file id="file-2">
+              <name>Radiohead_Exit_Music.wav</name>
+              <pathurl>file://localhost/Media/Audio/Radiohead_Exit_Music.wav</pathurl>
+            </file>
+          </clipitem>
+        </track>
+      </audio>
+    </media>
+  </sequence>
+</xmeml>

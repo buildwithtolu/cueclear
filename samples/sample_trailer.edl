@@ -1,0 +1,25 @@
+TITLE: NEON_MIRAGE_TRAILER_MASTER
+FCM: NON-DROP FRAME
+
+001  A1       NONE  C        00:00:00:00 00:00:05:00 00:00:00:00 00:00:05:00
+* FROM CLIP NAME: Studio_Ident_Logo.wav
+* COMMENT: SFX Logo sting
+
+002  A3       NONE  C        00:00:00:00 00:01:26:12 00:00:05:00 00:01:31:12
+* FROM CLIP NAME: M83 - Midnight City.wav
+* SOURCE FILE: /Volumes/Soundtrack/M83_MidnightCity.wav
+* COMMENT: Background score cue
+
+003  A3       NONE  C        00:00:00:00 00:00:45:00 00:01:32:00 00:02:17:00
+* FROM CLIP NAME: Hans Zimmer - Time.wav
+* SOURCE FILE: /Volumes/Soundtrack/Inception_Time_Master.wav
+* COMMENT: Climax buildup cue
+
+004  A4       NONE  C        00:00:10:00 00:01:10:00 00:02:18:00 00:03:18:00
+* FROM CLIP NAME: Daft Punk - Solar Sailer.wav
+* SOURCE FILE: /Volumes/Soundtrack/Tron_Solar_Sailer.wav
+* COMMENT: End credits theme
+
+005  A2       NONE  C        00:00:00:00 00:00:15:00 00:03:18:00 00:03:33:00
+* FROM CLIP NAME: Cinematic_Impact_SubBoom_04.wav
+* COMMENT: SFX Sub Bass hit

@@ -1,0 +1,11 @@
+{
+  "name": "cueclear",
+  "version": "1.0.0",
+  "description": "Autonomous Music Rights Clearance & Cue Sheet Agent",
+  "private": true,
+  "scripts": {
+    "dev": "python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload",
+    "start": "python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000",
+    "test": "pytest"
+  }
+}

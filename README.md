@@ -66,8 +66,7 @@ When an edit is locked, assistant editors and music supervisors spend days scrub
 
 ### 2. Clone & Install
 ```bash
-# TODO: replace with your real public repo URL before submission
-git clone https://github.com/<YOUR_GITHUB_USERNAME>/cueclear.git
+git clone https://github.com/buildwithtolu/cueclear.git
 cd cueclear
 
 # Create virtual environment (optional)

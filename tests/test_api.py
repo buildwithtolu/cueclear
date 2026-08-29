@@ -147,7 +147,8 @@ def test_frontend_static_serving():
     assert "Theses" not in res.text
     assert "HOLLYWOOD" not in res.text
     assert "IDENTITY ARCHETYPES" not in res.text
-    assert "brand-clapper" in res.text
+    assert "CUE" in res.text
+    assert "CLEAR" in res.text
 
 
 def test_sign_off_persists_into_export_manifest():

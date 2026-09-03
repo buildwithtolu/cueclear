@@ -149,6 +149,8 @@ def test_frontend_static_serving():
     assert "IDENTITY ARCHETYPES" not in res.text
     assert "CUE" in res.text
     assert "CLEAR" in res.text
+    assert 'rel="icon"' in res.text
+    assert "/favicon.svg" in res.text
 
 
 def test_sign_off_persists_into_export_manifest():

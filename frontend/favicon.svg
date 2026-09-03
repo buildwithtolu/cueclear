@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CueClear">
+  <rect width="64" height="64" rx="12" fill="#000000"/>
+  <path d="M14 18h8M14 18v8M50 18h-8M50 18v8M14 46h8M14 46v-8M50 46h-8M50 46v-8" stroke="#ffffff" stroke-width="4" stroke-linecap="square"/>
+  <path d="M42.8 23.2c-1.8-2.3-4.8-3.7-8.8-3.7-7.8 0-13 5.5-13 12.5s5.2 12.5 13 12.5c4 0 7-1.5 8.8-3.8l-4.2-3.1c-1 1.2-2.6 2-4.6 2-3.9 0-6.7-2.8-6.7-7.6s2.8-7.6 6.7-7.6c2 0 3.6 0.8 4.6 2l4.2-3.2z" fill="#ffffff"/>
+</svg>

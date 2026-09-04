@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>CueClear — Music Rights Clearance</title>
   <meta name="description" content="Turn locked-picture timelines into broadcast music cue sheets. Parallel Search + Extract, Gemini grounding, dual-sided split audit.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -81,13 +81,19 @@
   </section>
 
   <div class="hero-sub-bar">
-    <div>FILTER CUE RESULTS</div>
+    <div class="filter-bar-title">FILTER CUE RESULTS</div>
     <div class="filter-pills-row">
       <button class="filter-btn active" data-filter="all" type="button">All</button>
       <button class="filter-btn" data-filter="cleared" type="button">Cleared</button>
-      <button class="filter-btn" data-filter="pending" type="button">Pending sign-off</button>
-      <button class="filter-btn" data-filter="partial" type="button">Needs action</button>
-      <button class="filter-btn" data-filter="live" type="button">Live Parallel</button>
+      <button class="filter-btn" data-filter="pending" type="button">
+        <span class="label-full">Pending sign-off</span><span class="label-short">Pending</span>
+      </button>
+      <button class="filter-btn" data-filter="partial" type="button">
+        <span class="label-full">Needs action</span><span class="label-short">Action</span>
+      </button>
+      <button class="filter-btn" data-filter="live" type="button">
+        <span class="label-full">Live Parallel</span><span class="label-short">Live</span>
+      </button>
     </div>
   </div>
 
@@ -101,22 +107,28 @@
       <div class="card-body">
         <div class="reel-selectors-row">
           <button class="btn-reel-select" id="btnReelTrailer" data-reel="sample_trailer" type="button">
-            Sample: Trailer EDL
+            <span class="label-full">Sample: Trailer EDL</span><span class="label-short">Trailer</span>
           </button>
           <button class="btn-reel-select" id="btnReelIndie" data-reel="sample_indie" type="button">
-            Sample: Indie XML
+            <span class="label-full">Sample: Indie XML</span><span class="label-short">Indie</span>
           </button>
           <button class="btn-reel-select active" id="btnReelMixed" data-reel="sample_mixed" type="button">
-            Sample: Mixed clearance
+            <span class="label-full">Sample: Mixed clearance</span><span class="label-short">Mixed</span>
           </button>
           <button class="btn-reel-select" id="btnReelCustom" type="button">
-            Upload your file
+            <span class="label-full">Upload your file</span><span class="label-short">Upload</span>
           </button>
         </div>
 
         <div class="technical-dropzone" id="technicalDropzone" role="button" tabindex="0" aria-label="Upload timeline file">
-          <div class="dropzone-label">Drop an EDL or XML timeline here, or click to browse</div>
-          <div class="dropzone-sub">Supports CMX 3600 (.edl) and Premiere / Final Cut (.xml)</div>
+          <div class="dropzone-label">
+            <span class="label-full">Drop an EDL or XML timeline here, or click to browse</span>
+            <span class="label-short">Tap to upload EDL / XML</span>
+          </div>
+          <div class="dropzone-sub">
+            <span class="label-full">Supports CMX 3600 (.edl) and Premiere / Final Cut (.xml)</span>
+            <span class="label-short">.edl or .xml</span>
+          </div>
           <input type="file" id="fileInput" accept=".edl,.xml,.txt" style="display: none;">
         </div>
 
@@ -168,7 +180,7 @@
       </div>
     </div>
 
-    <div style="overflow-x: auto;">
+    <div class="table-scroll">
       <table class="swiss-matrix-table">
         <thead>
           <tr>

@@ -47,6 +47,7 @@ body.studio-body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 /* Monospace Utilities */
@@ -228,7 +229,9 @@ body.studio-body {
 
 .filter-pills-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  justify-content: flex-end;
 }
 
 .filter-btn {
@@ -293,6 +296,7 @@ body.studio-body {
 /* Technical Reel Selector Buttons */
 .reel-selectors-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -579,6 +583,11 @@ body.studio-body {
 
 .master-table-section {
   background: var(--swiss-white);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .table-top-bar {
@@ -910,29 +919,470 @@ body.studio-body {
   opacity: 0.8;
 }
 
-/* Responsive */
-@media (max-width: 900px) {
+/* Label switching helpers */
+.label-short { display: none; }
+.label-full { display: inline; }
+
+/* ==============================================================================
+   RESPONSIVE — standard device widths
+   Optimized for:
+   1280+ desktop | 1024 tablet landscape | 768 tablet | 430 Pro Max
+   412 Pixel | 390 iPhone 12/13/14 | 375 iPhone SE | 360 Android (360x800)
+   ============================================================================== */
+
+@media (max-width: 1100px) {
+  .table-search-input {
+    min-width: 200px;
+    width: min(100%, 260px);
+  }
+
+  .hero-sub-bar,
+  .table-top-bar,
+  .hero-left-col,
+  .hero-right-col {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+}
+
+/* Tablet / small laptop */
+@media (max-width: 1024px) {
   .swiss-hero-matrix {
     grid-template-columns: 1fr;
   }
+
   .hero-left-col {
     border-right: none;
     border-bottom: var(--border-grid);
-    padding: 32px 24px;
+    padding: 28px 20px;
   }
+
+  .hero-right-col {
+    padding: 22px 20px;
+  }
+
+  .hero-master-wordmark {
+    font-size: clamp(52px, 10vw, 80px);
+  }
+
   .workspace-grid {
     grid-template-columns: 1fr;
   }
+
   .workspace-card.left {
     border-right: none;
     border-bottom: var(--border-grid);
   }
+
+  .swiss-telemetry-topbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .topbar-col.topbar-actions {
+    grid-column: 1 / -1;
+    border-right: none;
+    border-top: var(--border-grid);
+    justify-content: stretch;
+    padding: 12px 16px;
+  }
+
+  .topbar-actions .export-menu-container,
+  .topbar-actions .btn-export-trigger {
+    width: 100%;
+  }
+
+  .hero-sub-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+
+  .filter-pills-row {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .btn-reel-select {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 140px;
+  }
+
+  .table-top-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .table-search-input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .swiss-matrix-table {
+    min-width: 820px;
+  }
+
+  .swiss-terminal-body,
+  #terminalFeed {
+    height: 280px;
+    max-height: 280px;
+  }
+}
+
+/* iPad portrait / large phones landscape */
+@media (max-width: 768px) {
+  .label-full { display: none; }
+  .label-short { display: inline; }
+
   .swiss-telemetry-topbar {
     grid-template-columns: 1fr;
   }
+
   .topbar-col {
     border-right: none;
     border-bottom: var(--border-grid);
+    padding: 10px 14px;
+  }
+
+  .topbar-col.topbar-actions {
+    grid-column: auto;
+    border-top: none;
+  }
+
+  .hero-left-col,
+  .hero-right-col {
+    padding: 20px 14px;
+  }
+
+  .hero-master-wordmark {
+    font-size: clamp(42px, 12vw, 64px);
+    line-height: 0.9;
+  }
+
+  .hero-manifesto-text {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .hero-sublabel {
+    margin-top: 16px;
+    font-size: 10px;
+  }
+
+  .card-header-bar {
+    padding: 12px 14px;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 11px;
+  }
+
+  .card-body {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .metadata-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .meta-cell {
+    border-right: none;
+    border-bottom: var(--border-grid);
+    padding: 10px 12px;
+  }
+
+  .meta-cell:last-child {
+    border-bottom: none;
+  }
+
+  .technical-dropzone {
+    padding: 20px 12px;
+  }
+
+  .swiss-terminal-body,
+  #terminalFeed {
+    height: 240px;
+    max-height: 240px;
+    padding: 12px 14px;
+  }
+
+  .modal-metadata-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-meta-box {
+    border-right: none;
+    border-bottom: var(--border-grid);
+  }
+
+  .modal-meta-box:last-child {
+    border-bottom: none;
+  }
+
+  .modal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .modal-actions .btn-export-trigger,
+  .modal-actions .btn-inspect-action {
+    width: 100%;
+    text-align: center;
+    padding: 12px;
+  }
+
+  .holder-row,
+  .split-labels {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .export-menu-popup {
+    left: 0;
+    right: 0;
+    width: auto;
+  }
+}
+
+/* Large phones: 430×932, 412×915 */
+@media (max-width: 430px) {
+  .hero-master-wordmark {
+    font-size: 44px;
+  }
+
+  .filter-btn {
+    font-size: 10px;
+    padding: 7px 10px;
+  }
+
+  .btn-reel-select {
+    flex: 1 1 calc(50% - 8px);
+    min-width: 0;
+    font-size: 10.5px;
+    padding: 10px 8px;
+  }
+
+  .swiss-terminal-body,
+  #terminalFeed {
+    height: 220px;
+    max-height: 220px;
+  }
+
+  .swiss-modal-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .swiss-modal-window {
+    min-height: 100%;
+    max-height: 100%;
+    border-left: none;
+    border-right: none;
+  }
+
+  .swiss-modal-body {
+    max-height: calc(100dvh - 56px);
+    padding: 14px;
+  }
+}
+
+/* Standard phones: 390×844, 375×812, 375×667 */
+@media (max-width: 390px) {
+  .hero-left-col,
+  .hero-right-col,
+  .hero-sub-bar,
+  .table-top-bar {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .hero-master-wordmark {
+    font-size: 40px;
+  }
+
+  .hero-manifesto-text {
+    font-size: 15px;
+  }
+
+  .btn-reel-select {
+    flex: 1 1 100%;
+  }
+
+  .btn-swiss-primary {
+    padding: 14px 12px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+
+  .swiss-terminal-body,
+  #terminalFeed {
+    height: 200px;
+    max-height: 200px;
+    font-size: 11px;
+  }
+
+  .table-top-bar h3 {
+    font-size: 16px;
+  }
+
+  .swiss-matrix-table {
+    min-width: 760px;
+    font-size: 11px;
+  }
+
+  .swiss-matrix-table th,
+  .swiss-matrix-table td {
+    padding: 10px 10px;
+  }
+}
+
+/* Compact Android: 360×800, 360×640 */
+@media (max-width: 360px) {
+  .topbar-col {
+    padding: 8px 10px;
+  }
+
+  .btn-export-trigger {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 10.5px;
+  }
+
+  .hero-left-col,
+  .hero-right-col {
+    padding: 16px 10px;
+  }
+
+  .hero-master-wordmark {
+    font-size: 34px;
+    letter-spacing: -0.04em;
+  }
+
+  .hero-left-footer {
+    margin-top: 14px;
+  }
+
+  .hero-manifesto-text {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .hero-sublabel {
+    margin-top: 12px;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+  }
+
+  .hero-sub-bar {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .filter-bar-title {
+    font-size: 10px;
+  }
+
+  .filter-btn {
+    font-size: 9.5px;
+    padding: 6px 8px;
+  }
+
+  .card-header-bar {
+    padding: 10px;
+    font-size: 10.5px;
+  }
+
+  #activeTimelineLabel {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-body {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .technical-dropzone {
+    padding: 16px 10px;
+  }
+
+  .dropzone-label {
+    font-size: 11px;
+  }
+
+  .meta-key {
+    font-size: 9px;
+  }
+
+  .meta-val {
+    font-size: 11px;
+  }
+
+  .swiss-terminal-body,
+  #terminalFeed {
+    height: 180px;
+    max-height: 180px;
+    padding: 10px;
+    font-size: 10.5px;
+  }
+
+  .table-top-bar {
+    padding: 12px 10px;
+  }
+
+  .empty-state-cell {
+    padding: 24px 10px;
+    font-size: 11px;
+  }
+
+  .swiss-modal-header {
+    padding: 12px 10px;
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .swiss-modal-body {
+    padding: 12px 10px;
+    gap: 12px;
+  }
+}
+
+/* Short viewports (e.g. 360×640, landscape phones) */
+@media (max-height: 700px) and (max-width: 900px) {
+  .hero-left-col {
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .hero-master-wordmark {
+    font-size: clamp(32px, 10vh, 48px);
+  }
+
+  .swiss-terminal-body,
+  #terminalFeed {
+    height: 160px;
+    max-height: 160px;
+  }
+}
+
+/* Safe areas for notched phones */
+@supports (padding: max(0px)) {
+  body.studio-body {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+  }
+
+  .swiss-telemetry-topbar {
+    padding-top: max(0px, env(safe-area-inset-top));
+  }
+
+  .swiss-modal-window {
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
   }
 }
 

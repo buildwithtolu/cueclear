@@ -176,9 +176,15 @@ async function switchReel(reelId) {
       throw new Error(`Upload failed (${res.status})`);
     }
     const data = await res.json();
-    applyTimelineMeta(data);
+    const readyHint = reelId === 'sample_mixed'
+      ? 'Recommended demo: Case A cleared · Case B pending · unresolved non-catalog.'
+      : 'Ready to clear this timeline.';
+    applyTimelineMeta(data, readyHint);
     resetClearanceState();
     logTerminal('term-sys', `Loaded "${sample.name}" — ${data.total_clips} audio cue(s) detected.`);
+    if (reelId === 'sample_mixed') {
+      logTerminal('term-sys', 'Demo path: Midnight City (Case A) → Exit Music (Case B) → Unknown cue (unresolved).');
+    }
   } catch (err) {
     logTerminal('term-flagged', `Failed to ingest sample: ${err.message}`);
   }
@@ -211,7 +217,7 @@ async function handleFileUpload(file) {
   }
 }
 
-function applyTimelineMeta(data) {
+function applyTimelineMeta(data, readyHint) {
   hasTimelineLoaded = Number(data.total_clips || 0) > 0;
   document.getElementById('valClipCount').textContent = hasTimelineLoaded
     ? `${data.total_clips} cue${data.total_clips === 1 ? '' : 's'}`
@@ -222,7 +228,9 @@ function applyTimelineMeta(data) {
     : '—';
   setResolveEnabled(
     hasTimelineLoaded,
-    hasTimelineLoaded ? 'Ready to clear this timeline.' : 'Load a timeline first.'
+    hasTimelineLoaded
+      ? (readyHint || 'Ready to clear this timeline.')
+      : 'Load a timeline first.'
   );
 }
 
@@ -537,6 +545,23 @@ function renderCueMatrix() {
       sourceTag = '<span class="tag-telemetry-chip sfx">In-house SFX</span>';
     }
 
+    const provenanceBits = [];
+    if (cue.provenance) {
+      provenanceBits.push(`<span class="tag-telemetry-chip provenance" title="Provenance">${escapeHtml(String(cue.provenance).replace(/_/g, ' '))}</span>`);
+    }
+    if (cue.invoke_mode) {
+      provenanceBits.push(`<span class="tag-telemetry-chip invoke" title="ADK invoke mode">${escapeHtml(cue.invoke_mode)}</span>`);
+    }
+    if (cue.search_id) {
+      provenanceBits.push(`<span class="tag-telemetry-chip idchip" title="Parallel Search ID">S ${escapeHtml(String(cue.search_id).slice(0, 10))}</span>`);
+    }
+    if (cue.extract_id) {
+      provenanceBits.push(`<span class="tag-telemetry-chip idchip" title="Parallel Extract ID">E ${escapeHtml(String(cue.extract_id).slice(0, 10))}</span>`);
+    }
+    const provenanceRow = provenanceBits.length
+      ? `<div class="cue-provenance-row">${provenanceBits.join('')}</div>`
+      : '';
+
     return `
       <tr>
         <td class="font-mono" style="font-weight: 800;">${String(cue.cue_number).padStart(3, '0')}</td>
@@ -544,6 +569,7 @@ function renderCueMatrix() {
           <strong style="font-size: 13px; font-weight: 800; display: block;">${escapeHtml(cue.title)}</strong>
           <span style="font-size: 11px; color: var(--swiss-gray-mid); display: block;">${escapeHtml(cue.artist || 'Unknown artist')}</span>
           <div>${sourceTag}</div>
+          ${provenanceRow}
         </td>
         <td><span class="tag-usage-outline">${escapeHtml(cue.usage_type || '—')}</span></td>
         <td class="font-mono">${escapeHtml(cue.timecode_in)} → ${escapeHtml(cue.timecode_out)}</td>

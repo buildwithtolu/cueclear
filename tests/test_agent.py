@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from backend.models.schemas import ResolvedCue, RightsHolder, UsageType, SplitStatus, ExtractedPROData
 from backend.agent.split_reconciler import validate_splits, compute_manifest_compliance
 from backend.agent.adk_orchestrator import CueClearADKOrchestrator as CueClearAgent
@@ -125,3 +125,137 @@ async def test_agent_orchestrator_end_to_end():
     assert "Midnight City" in m83_cue.title
     assert len(m83_cue.writers) >= 1
     assert m83_cue.total_writer_share >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_adk_uses_fresh_session_per_cue():
+    """
+    Regression: reusing one ADK session across cues caused Gemini to skip
+    parallel_pro_search_tool after cue 1 (direct_tool_fallback on cues 2+).
+    Fresh per-cue sessions must keep invoke_mode=adk_runner for every music cue.
+    """
+    from backend.models.schemas import ParsedAudioClip
+
+    clips = [
+        ParsedAudioClip(
+            event_number=1, track_type="A1", clip_name="M83 - Midnight City.wav",
+            source_in="00:00:00:00", source_out="00:00:40:00",
+            record_in="00:00:00:00", record_out="00:00:40:00",
+            duration_frames=960, duration_timecode="00:00:40:00",
+        ),
+        ParsedAudioClip(
+            event_number=2, track_type="A1", clip_name="Radiohead - Exit Music For A Film.wav",
+            source_in="00:00:00:00", source_out="00:00:35:00",
+            record_in="00:00:40:00", record_out="00:01:15:00",
+            duration_frames=840, duration_timecode="00:00:35:00",
+        ),
+        ParsedAudioClip(
+            event_number=3, track_type="A1", clip_name="Unknown Indie Needle Drop 07_final.wav",
+            source_in="00:00:00:00", source_out="00:00:28:00",
+            record_in="00:01:15:00", record_out="00:01:43:00",
+            duration_frames=672, duration_timecode="00:00:28:00",
+        ),
+    ]
+
+    class _FR:
+        def __init__(self, name, response):
+            self.name = name
+            self.response = response
+
+    class _Part:
+        def __init__(self, fr):
+            self.function_response = fr
+
+    class _Content:
+        def __init__(self, parts):
+            self.parts = parts
+
+    class _Event:
+        def __init__(self, content):
+            self.content = content
+
+    created_session_ids = []
+    run_session_ids = []
+    call_count = {"n": 0}
+
+    async def fake_search(track_title: str, artist: str = ""):
+        call_count["n"] += 1
+        return {
+            "status": "success",
+            "source": "Mock Parallel",
+            "source_type": "LIVE_PARALLEL_API",
+            "search_id": f"search_mock_{call_count['n']}",
+            "extract_id": f"extract_mock_{call_count['n']}",
+            "extracted_urls": ["https://www.ascap.com/repertory"],
+            "latency_ms": 12.0,
+            "is_live_hit": True,
+            "provenance": "LIVE_PARALLEL_SEARCH_AND_EXTRACT",
+            "title": track_title,
+            "artist": artist or "Various Artists",
+            "work_id": None,
+            "iswc": None,
+            "writers": [],
+            "publishers": [],
+            "excerpts": [f"Mock PRO excerpt for {track_title}"],
+            "source_citation": "Mock Parallel",
+        }
+
+    agent = CueClearAgent()
+    agent.has_gemini = True
+
+    original_create = agent.session_service.create_session
+
+    async def tracking_create_session(**kwargs):
+        session = await original_create(**kwargs)
+        created_session_ids.append(session.id)
+        return session
+
+    async def fake_run_async(*, user_id, session_id, new_message):
+        run_session_ids.append(session_id)
+        text = ""
+        if new_message and new_message.parts:
+            text = getattr(new_message.parts[0], "text", "") or ""
+        title = "Unknown"
+        for line in text.splitlines():
+            if line.startswith("track_title="):
+                title = line.split("=", 1)[1].strip().strip('"')
+                break
+        payload = await fake_search(title, "")
+        yield _Event(_Content([_Part(_FR("parallel_pro_search_tool", payload))]))
+
+    with patch.object(agent.session_service, "create_session", side_effect=tracking_create_session):
+        with patch.object(agent.runner, "run_async", side_effect=fake_run_async):
+            with patch(
+                "backend.agent.adk_orchestrator.parallel_pro_search_tool",
+                side_effect=fake_search,
+            ):
+                with patch(
+                    "backend.agent.adk_orchestrator.extract_pro_rights_with_gemini",
+                    new=AsyncMock(
+                        return_value=ExtractedPROData(
+                            work_id=None,
+                            iswc=None,
+                            writers=[],
+                            publishers=[],
+                            confidence_notes="test",
+                        )
+                    ),
+                ):
+                    events = []
+                    async for event in agent.process_timeline_stream(clips, "ADK Session Isolation"):
+                        events.append(event)
+
+    music_results = [
+        e for e in events
+        if e.event_type == "parallel_result" and e.data and e.data.get("invoke_mode")
+    ]
+    assert len(music_results) == 3
+    assert all(e.data.get("invoke_mode") == "adk_runner" for e in music_results)
+    assert not any("[ADK_FALLBACK]" in (e.message or "") for e in events)
+
+    # Parent clearance session + one ADK session per music cue
+    assert len(created_session_ids) >= 4
+    cue_sessions = [s for s in created_session_ids if "-cue-" in s]
+    assert len(cue_sessions) == 3
+    assert len(set(cue_sessions)) == 3
+    assert run_session_ids == cue_sessions

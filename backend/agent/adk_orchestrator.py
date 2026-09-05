@@ -82,24 +82,60 @@ class CueClearADKOrchestrator:
         self.adk_active = self.has_gemini
 
         # ADK agent owns Parallel Search tool-calling. Extract + audit stay explicit.
+        # Prefer 3.6-flash, then aliases that remain available when free-tier quotas trip.
+        env_model = os.getenv("CUECLEAR_ADK_MODEL", "").strip()
+        self.adk_model_candidates: List[str] = []
+        if env_model:
+            self.adk_model_candidates.append(env_model)
+        for model_name in ("gemini-3.6-flash", "gemini-flash-latest", "gemini-3-flash-preview"):
+            if model_name not in self.adk_model_candidates:
+                self.adk_model_candidates.append(model_name)
+        self.adk_model = self.adk_model_candidates[0]
+        self._adk_instruction = (
+            "You are CueClear's PRO search agent on Google ADK. "
+            "Each user message is an independent music cue with a fresh session. "
+            "Always call parallel_pro_search_tool exactly once for the current cue "
+            "with the provided track_title and artist. "
+            "Do not invent Work IDs, writers, publishers, or ownership shares. "
+            "After the tool returns, briefly confirm that search completed."
+        )
+        self._build_adk_runner(self.adk_model)
+
+    def _build_adk_runner(self, model_name: str) -> None:
+        self.adk_model = model_name
         self.agent = Agent(
             name="cueclear_adk_agent",
-            model="gemini-3.6-flash",
-            instruction=(
-                "You are CueClear's PRO search agent on Google ADK. "
-                "When given a music cue, call parallel_pro_search_tool exactly once "
-                "with the provided track_title and artist. "
-                "Do not invent Work IDs, writers, publishers, or ownership shares. "
-                "After the tool returns, briefly confirm that search completed."
-            ),
+            model=model_name,
+            instruction=self._adk_instruction,
             tools=[parallel_pro_search_tool],
         )
-
         self.runner = Runner(
             agent=self.agent,
             app_name="cueclear_studio",
             session_service=self.session_service,
         )
+
+    def _rotate_adk_model(self, err: Exception) -> bool:
+        """Advance to the next ADK model candidate after 404/429. Returns True if rotated."""
+        err_l = str(err).lower()
+        retriable = (
+            "404" in err_l
+            or "not found" in err_l
+            or "no longer available" in err_l
+            or "429" in err_l
+            or "resource_exhausted" in err_l
+        )
+        if not retriable:
+            return False
+        try:
+            idx = self.adk_model_candidates.index(self.adk_model)
+        except ValueError:
+            idx = 0
+        if idx + 1 >= len(self.adk_model_candidates):
+            return False
+        next_model = self.adk_model_candidates[idx + 1]
+        self._build_adk_runner(next_model)
+        return True
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
@@ -108,10 +144,13 @@ class CueClearADKOrchestrator:
         self,
         track_title: str,
         artist: str,
-        session_id: str,
+        clearance_session_id: str,
+        cue_number: int,
     ) -> tuple[Dict[str, Any], str, Optional[str]]:
         """
         Prefer ADK Runner tool-calling for Parallel Search.
+        Uses a fresh ADK session per cue so prior tool history cannot suppress
+        subsequent parallel_pro_search_tool calls.
         Fall back to direct tool invocation if ADK/Gemini is unavailable or fails.
         Returns (result, invoke_mode, fallback_reason).
         """
@@ -124,7 +163,8 @@ class CueClearADKOrchestrator:
             parts=[
                 types.Part(
                     text=(
-                        "Call parallel_pro_search_tool exactly once for this music cue.\n"
+                        f"Cue #{cue_number:02d} is a new independent search. "
+                        "Call parallel_pro_search_tool exactly once NOW for this cue only.\n"
                         f'track_title="{track_title}"\n'
                         f'artist="{artist or ""}"\n'
                         "Do not invent Work IDs or ownership shares."
@@ -133,41 +173,80 @@ class CueClearADKOrchestrator:
             ],
         )
 
-        try:
-            tool_payload: Optional[Dict[str, Any]] = None
-            async for event in self.runner.run_async(
+        last_err: Optional[Exception] = None
+        rotated_from: Optional[str] = None
+        for attempt in range(len(self.adk_model_candidates)):
+            cue_session_id = (
+                f"{clearance_session_id}-cue-{cue_number:03d}"
+                if attempt == 0
+                else f"{clearance_session_id}-cue-{cue_number:03d}-m{attempt}"
+            )
+            cue_session = await self.session_service.create_session(
+                app_name="cueclear_studio",
                 user_id="post_supervisor_1",
-                session_id=session_id,
-                new_message=message,
-            ):
-                if not event.content or not event.content.parts:
-                    continue
-                for part in event.content.parts:
-                    fr = getattr(part, "function_response", None)
-                    if fr is None or fr.name != "parallel_pro_search_tool":
+                session_id=cue_session_id,
+            )
+            try:
+                tool_payload: Optional[Dict[str, Any]] = None
+                async for event in self.runner.run_async(
+                    user_id="post_supervisor_1",
+                    session_id=cue_session.id,
+                    new_message=message,
+                ):
+                    if not event.content or not event.content.parts:
                         continue
-                    response = fr.response
-                    if isinstance(response, dict):
-                        tool_payload = response
-                    elif response is not None:
-                        tool_payload = dict(response)
+                    for part in event.content.parts:
+                        fr = getattr(part, "function_response", None)
+                        if fr is None or fr.name != "parallel_pro_search_tool":
+                            continue
+                        response = fr.response
+                        if isinstance(response, dict):
+                            tool_payload = response
+                        elif response is not None:
+                            tool_payload = dict(response)
 
-            if tool_payload and tool_payload.get("status") == "success":
-                return tool_payload, "adk_runner", None
+                if tool_payload and tool_payload.get("status") == "success":
+                    if rotated_from:
+                        tool_payload = {
+                            **tool_payload,
+                            "adk_model": self.adk_model,
+                            "adk_model_rotated_from": rotated_from,
+                        }
+                    else:
+                        tool_payload = {**tool_payload, "adk_model": self.adk_model}
+                    return tool_payload, "adk_runner", None
 
-            result = await parallel_pro_search_tool(track_title, artist)
-            return (
-                result,
-                "direct_tool_fallback",
-                "ADK Runner completed without a Parallel tool response; used direct Parallel Search",
-            )
-        except Exception as adk_err:
-            result = await parallel_pro_search_tool(track_title, artist)
-            return (
-                result,
-                "direct_tool_fallback",
-                f"ADK Runner error ({type(adk_err).__name__}: {adk_err}); used direct Parallel Search",
-            )
+                result = await parallel_pro_search_tool(track_title, artist)
+                return (
+                    result,
+                    "direct_tool_fallback",
+                    "ADK Runner completed without a Parallel tool response; used direct Parallel Search",
+                )
+            except Exception as adk_err:
+                last_err = adk_err
+                previous = self.adk_model
+                if self._rotate_adk_model(adk_err):
+                    rotated_from = previous
+                    continue
+                break
+            finally:
+                try:
+                    await self.session_service.delete_session(
+                        app_name="cueclear_studio",
+                        user_id="post_supervisor_1",
+                        session_id=cue_session.id,
+                    )
+                except Exception:
+                    pass
+
+        result = await parallel_pro_search_tool(track_title, artist)
+        if last_err is not None:
+            err_name = type(last_err).__name__
+            err_text = " ".join(str(last_err).split())[:160]
+            reason = f"ADK Runner error ({err_name}: {err_text}); used direct Parallel Search"
+        else:
+            reason = "ADK Runner unavailable; used direct Parallel Search"
+        return result, "direct_tool_fallback", reason
 
     async def process_timeline_stream(
         self,
@@ -187,8 +266,8 @@ class CueClearADKOrchestrator:
             event_type="start",
             timestamp=self._now(),
             message=(
-                f"[ADK_INIT] Session {session.id[:8]} ready. "
-                f"ADK Runner will invoke Parallel Search tools"
+                f"[ADK_INIT] Clearance {session.id[:8]} ready. "
+                f"ADK model={self.adk_model}; fresh tool session per cue"
                 f"{'' if self.has_gemini else ' (Gemini unavailable: direct tool fallback)'}. "
                 f"Ingested {len(clips)} timeline clips."
             ),
@@ -197,21 +276,53 @@ class CueClearADKOrchestrator:
                 "project": project_title,
                 "session_id": session.id,
                 "adk_tool_calling": self.has_gemini,
+                "adk_session_policy": "per_cue",
+                "adk_model": self.adk_model,
             },
         )
-        await asyncio.sleep(0.05)
 
-        resolved_cues: List[ResolvedCue] = []
+        # Pre-plan work items so we can overlap next-cue ADK search with Gemini extract.
+        planned: List[Dict[str, Any]] = []
         cue_number = 1
         for clip in clips:
+            raw_title, raw_artist, usage = self._clean_track_name(clip.clip_name)
+            is_sfx = any(
+                k in clip.clip_name.lower()
+                for k in ["sfx", "ident", "subboom", "impact", "foley", "roomtone"]
+            )
+            planned.append({
+                "clip": clip,
+                "cue_number": cue_number,
+                "raw_title": raw_title,
+                "raw_artist": raw_artist,
+                "usage": usage,
+                "is_sfx": is_sfx,
+            })
+            cue_number += 1
+
+        music_indices = [i for i, item in enumerate(planned) if not item["is_sfx"]]
+        prefetch_task: Optional[asyncio.Task] = None
+        prefetch_index: Optional[int] = None
+
+        def _start_adk_search(item: Dict[str, Any]) -> asyncio.Task:
+            return asyncio.create_task(
+                self._invoke_parallel_via_adk(
+                    item["raw_title"],
+                    item["raw_artist"],
+                    session.id,
+                    item["cue_number"],
+                )
+            )
+
+        resolved_cues: List[ResolvedCue] = []
+        for idx, item in enumerate(planned):
+            clip = item["clip"]
+            cue_number = item["cue_number"]
+            raw_title = item["raw_title"]
+            raw_artist = item["raw_artist"]
+            usage = item["usage"]
             try:
-                # 1. Cue Identification & Filter Phase
-                raw_title, raw_artist, usage = self._clean_track_name(clip.clip_name)
-                
-                # Check if this is SFX/Dialogue or a music cue
-                is_sfx = any(k in clip.clip_name.lower() for k in ["sfx", "ident", "subboom", "impact", "foley", "roomtone"])
-                
-                if is_sfx:
+                if item["is_sfx"]:
                     yield AgentEvent(
                         event_type="reasoning",
                         timestamp=self._now(),
@@ -219,7 +330,6 @@ class CueClearADKOrchestrator:
                         cue_number=cue_number,
                         data={"clip": clip.clip_name, "type": "SFX"}
                     )
-                    await asyncio.sleep(0.1)
 
                     cue = ResolvedCue(
                         cue_number=cue_number,
@@ -248,25 +358,41 @@ class CueClearADKOrchestrator:
                         cue_number=cue_number,
                         data=cue.model_dump()
                     )
-                    cue_number += 1
                     continue
 
                 # Step 1: Parallel PRO Search via ADK Runner tool-calling
+                prefetched = prefetch_task is not None and prefetch_index == idx
                 yield AgentEvent(
                     event_type="parallel_query",
                     timestamp=self._now(),
                     message=(
-                        f"[ADK_TOOL] Invoking parallel_pro_search_tool for '{raw_title}' "
+                        f"[ADK_TOOL] {'Resuming prefetched' if prefetched else 'Invoking'} "
+                        f"parallel_pro_search_tool for '{raw_title}' "
                         f"(Artist: {raw_artist or 'N/A'})..."
                     ),
                     cue_number=cue_number,
+                    data={"prefetched": prefetched},
                 )
 
-                pro_result, invoke_mode, fallback_reason = await self._invoke_parallel_via_adk(
-                    raw_title,
-                    raw_artist,
-                    session.id,
-                )
+                if prefetched and prefetch_task is not None:
+                    pro_result, invoke_mode, fallback_reason = await prefetch_task
+                    prefetch_task = None
+                    prefetch_index = None
+                else:
+                    if prefetch_task is not None:
+                        prefetch_task.cancel()
+                        try:
+                            await prefetch_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                        prefetch_task = None
+                        prefetch_index = None
+                    pro_result, invoke_mode, fallback_reason = await self._invoke_parallel_via_adk(
+                        raw_title,
+                        raw_artist,
+                        session.id,
+                        cue_number,
+                    )
 
                 if invoke_mode != "adk_runner" and fallback_reason:
                     yield AgentEvent(
@@ -291,7 +417,8 @@ class CueClearADKOrchestrator:
                         f"[PARALLEL_HIT] [{source_tag}] via {invoke_mode}: "
                         f"provenance={provenance}; Work ID '{work_id_display}' "
                         f"({len(pro_result.get('excerpts', []))} excerpts, "
-                        f"search_id={str(pro_result.get('search_id'))[:12]})"
+                        f"search_id={str(pro_result.get('search_id'))[:12]}, "
+                        f"extract_id={str(pro_result.get('extract_id') or '—')[:12]})"
                     ),
                     cue_number=cue_number,
                     data={
@@ -321,13 +448,41 @@ class CueClearADKOrchestrator:
                         },
                     )
 
+                # Overlap next cue's ADK+Parallel search with this cue's Gemini extract + audit.
+                try:
+                    pos = music_indices.index(idx)
+                    if pos + 1 < len(music_indices):
+                        next_idx = music_indices[pos + 1]
+                        next_item = planned[next_idx]
+                        prefetch_task = _start_adk_search(next_item)
+                        prefetch_index = next_idx
+                        yield AgentEvent(
+                            event_type="reasoning",
+                            timestamp=self._now(),
+                            message=(
+                                f"[ADK_PREFETCH] Started Parallel search for cue "
+                                f"#{next_item['cue_number']:02d} '{next_item['raw_title']}' "
+                                "while Gemini grounds the current cue."
+                            ),
+                            cue_number=cue_number,
+                            data={
+                                "prefetch_cue_number": next_item["cue_number"],
+                                "prefetch_title": next_item["raw_title"],
+                            },
+                        )
+                except ValueError:
+                    pass
+
                 # Step 2: Deterministic Gemini structured extraction from Parallel Search+Extract text
+                grounding_excerpts = [
+                    str(x)[:1500] for x in (pro_result.get("excerpts") or [])[:8]
+                ]
                 yield AgentEvent(
                     event_type="reasoning",
                     timestamp=self._now(),
                     message=(
                         f"[GEMINI_EXTRACT] Grounding rights holders from "
-                        f"{len(pro_result.get('excerpts', []))} Parallel Search/Extract excerpts..."
+                        f"{len(grounding_excerpts)} Parallel Search/Extract excerpts..."
                     ),
                     cue_number=cue_number,
                 )
@@ -335,7 +490,7 @@ class CueClearADKOrchestrator:
                 extracted = await extract_pro_rights_with_gemini(
                     raw_title,
                     raw_artist,
-                    pro_result.get("excerpts", []),
+                    grounding_excerpts,
                 )
 
                 # Step 3: Deterministic dual-sided split audit
@@ -404,6 +559,14 @@ class CueClearADKOrchestrator:
                     )
 
             except Exception as cue_err:
+                if prefetch_task is not None:
+                    prefetch_task.cancel()
+                    try:
+                        await prefetch_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    prefetch_task = None
+                    prefetch_index = None
                 yield AgentEvent(
                     event_type="reasoning",
                     timestamp=self._now(),
@@ -439,7 +602,12 @@ class CueClearADKOrchestrator:
                     data=fallback_cue.model_dump()
                 )
 
-            cue_number += 1
+        if prefetch_task is not None:
+            prefetch_task.cancel()
+            try:
+                await prefetch_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
         manifest = compute_manifest_compliance(resolved_cues, project_title)
 

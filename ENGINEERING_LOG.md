@@ -3,7 +3,7 @@
 > Active source of truth for hackathon hardening. Updated as issues are identified and fixed.
 
 **Track:** Parallel (Google Cloud Agentic Cinema)  
-**Last updated:** 2026-08-21
+**Last updated:** 2026-09-05
 
 ---
 
@@ -201,7 +201,7 @@ No open product P0/P1 items from the final-pass list.
 | Meaningful Parallel contribution beyond name-drop | Satisfied (Search + Extract → Gemini grounding) |
 | Real M&E workflow (cue sheet / rights clearance) | Satisfied |
 | Coherent product experience (ingest → clear → audit → export) | Satisfied |
-| Hosted URL / public repo / demo video | Not satisfied yet (in progress separately) |
+| Hosted URL / public repo / demo video | Hosted URL + public repo satisfied; demo video still in progress |
 
 ## 9. Competitive Improvements
 
@@ -229,8 +229,8 @@ No open product P0/P1 items from the final-pass list.
 
 ## 12. Final Submission Checklist
 
-- [ ] Public GitHub/GitLab/Bitbucket with MIT license visible (in progress separately)  
-- [ ] Hosted project URL (in progress separately)  
+- [x] Public GitHub/GitLab/Bitbucket with MIT license visible  
+- [x] Hosted project URL (`https://cueclear.vercel.app/`)  
 - [ ] ≤3 min English demo video (in progress separately)  
 - [ ] Devpost form + Parallel track selected  
 - [ ] README matches real architecture (no MCP/ADK overclaims)  
@@ -240,6 +240,41 @@ No open product P0/P1 items from the final-pass list.
 ---
 
 ## Change Records
+
+### 2026-09-05 — ADK consistency + live latency + demo polish
+
+**Issues:**
+1. Live probe: cue 1 `invoke_mode=adk_runner`, cues 2–3 `direct_tool_fallback` after shared ADK session reuse.
+2. Mixed clearance ~152s wall time too slow for judge click-through.
+3. README still had placeholder live demo URL; provenance IDs mostly buried in Details modal.
+
+**Root cause (ADK):** `process_timeline_stream` created one `InMemorySessionService` session and reused it for every `runner.run_async`. After cue 1’s tool call sat in history, Gemini often answered in text only for later cues (“call exactly once”), so `_invoke_parallel_via_adk` fell back and emitted `[ADK_FALLBACK]`. Fallback also paid a wasted ADK round-trip before direct Parallel.
+
+**Fix:**
+- Fresh ADK session per cue (`{clearance_id}-cue-{n}`), deleted after each invoke.
+- Prefetch next cue’s ADK+Parallel search while current cue’s Gemini extract/audit runs.
+- ADK model failover on 404/429: `gemini-3.6-flash` → `gemini-flash-latest` → `gemini-3-flash-preview` (env override via `CUECLEAR_ADK_MODEL`).
+- Parallel Extract: top 2 PRO URLs (was 3), `max_chars_total=8000`, client timeout 25s; Gemini grounding capped to 8×1500-char excerpts.
+- UI: cue-row chips for provenance / invoke_mode / Search ID / Extract ID; Mixed sample marked recommended; mobile 360px reel grid + CTA polish.
+- README canonical demo URL `https://cueclear.vercel.app/` + 60s judge path.
+
+**Verification:**
+- Unit: `test_adk_uses_fresh_session_per_cue` asserts 3 distinct cue sessions and `invoke_mode=adk_runner` for all music cues (no `[ADK_FALLBACK]`).
+- Core regression: 24 passed (`test_agent`, `test_parallel`, `test_stress_audit`, `test_api`).
+- Local Mixed Clearance live probe (2026-09-05):
+  - Wall time **68.1s** (prior hosted baseline ~**152s**)
+  - `invoke_mode`: **adk_runner / adk_runner / adk_runner** (0 `[ADK_FALLBACK]`)
+  - Provenance: all `LIVE_PARALLEL_SEARCH_AND_EXTRACT`
+  - Outcomes: Midnight City CLEARED · Exit Music PENDING · Unknown UNRESOLVED
+  - Prefetch events observed between cues
+- Hosted `https://cueclear.vercel.app/` still serves pre-change build until deploy/push.
+
+**Remaining risks before Top 3:**
+- Gemini free-tier quotas on `gemini-3.6-flash` (~20/day) can force model rotation or `[ADK_FALLBACK]` during heavy local testing; production/demo keys should be paid or higher-limit.
+- Trailer video still missing.
+- Hosted deploy required before judges see ADK consistency + provenance chips.
+
+**Hackathon impact:** Direct Technological Implementation fix for ADK honesty + snappier demo; Design/Impact via unmistakable Parallel provenance on the happy path.
 
 ### 2026-08-21 — Hardening pass started
 

@@ -730,6 +730,34 @@ body.studio-body {
   color: #6B21A8;
 }
 
+.tag-telemetry-chip.provenance {
+  background: #ECFDF5;
+  color: #047857;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tag-telemetry-chip.invoke {
+  background: #EEF2FF;
+  color: #3730A3;
+  text-transform: none;
+}
+
+.tag-telemetry-chip.idchip {
+  background: #F8FAFC;
+  color: #334155;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.cue-provenance-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 320px;
+}
+
 .btn-inspect-action {
   background: var(--swiss-white);
   border: var(--border-grid);
@@ -1321,6 +1349,38 @@ body.studio-body {
 
   .meta-val {
     font-size: 11px;
+  }
+
+  .reel-selectors-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .btn-reel-select {
+    width: 100%;
+    min-height: 36px;
+    padding: 8px 6px;
+    font-size: 10px;
+  }
+
+  .btn-swiss-primary {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .helper-note {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .cue-provenance-row {
+    max-width: 100%;
+  }
+
+  .tag-telemetry-chip {
+    font-size: 8.5px;
+    padding: 2px 4px;
   }
 
   .swiss-terminal-body,

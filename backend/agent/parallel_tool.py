@@ -219,7 +219,7 @@ async def search_pro_music_rights(
 
         for attempt in range(max_retries):
             try:
-                async with AsyncParallel(api_key=PARALLEL_API_KEY.strip(), timeout=30.0) as client:
+                async with AsyncParallel(api_key=PARALLEL_API_KEY.strip(), timeout=25.0) as client:
                     search_result = await client.search(
                         objective=objective,
                         search_queries=search_queries,
@@ -229,7 +229,8 @@ async def search_pro_music_rights(
                     search_id = getattr(search_result, "search_id", None) or f"search_{abs(hash(clean_title)):x}"
                     results = list(getattr(search_result, "results", []) or [])
                     excerpts = _collect_search_excerpts(results)
-                    extract_urls = _pick_extract_urls(results, limit=3)
+                    # Cap extract URL count for latency; PRO-ranked URLs still preferred.
+                    extract_urls = _pick_extract_urls(results, limit=2)
                     extract_id = None
 
                     # Deepen Parallel contribution: Extract full PRO page context for Gemini grounding
@@ -238,7 +239,7 @@ async def search_pro_music_rights(
                             extract_resp = await client.extract(
                                 urls=extract_urls,
                                 objective=objective,
-                                max_chars_total=12000,
+                                max_chars_total=8000,
                             )
                             extract_id = getattr(extract_resp, "extract_id", None)
                             for er in list(getattr(extract_resp, "results", []) or []):

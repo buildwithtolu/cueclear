@@ -57,8 +57,16 @@ async def extract_pro_rights_with_gemini(
                 f"5. Write a brief 'confidence_notes' explaining whether splits were explicitly cited or undisclosed in the text."
             )
             
-            # Prefer current Gemini Flash; keep prior id as fallback
-            for model_name in ["gemini-3.6-flash", "gemini-2.5-flash"]:
+            # Prefer current Gemini Flash; allow optional override + lite fallback.
+            model_candidates = []
+            env_model = os.getenv("CUECLEAR_GEMINI_EXTRACT_MODEL", "").strip()
+            if env_model:
+                model_candidates.append(env_model)
+            for model_name in ["gemini-3.6-flash", "gemini-flash-latest", "gemini-3-flash-preview"]:
+                if model_name not in model_candidates:
+                    model_candidates.append(model_name)
+
+            for model_name in model_candidates:
                 try:
                     response = client.models.generate_content(
                         model=model_name,
@@ -73,7 +81,10 @@ async def extract_pro_rights_with_gemini(
                         data_dict = json.loads(response.text)
                         return ExtractedPROData(**data_dict)
                 except Exception as model_err:
-                    if "404" in str(model_err) or "not found" in str(model_err).lower():
+                    err = str(model_err).lower()
+                    if "404" in err or "not found" in err or "no longer available" in err:
+                        continue
+                    if "429" in err or "resource_exhausted" in err:
                         continue
                     raise model_err
         except Exception:

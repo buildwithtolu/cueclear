@@ -20,9 +20,17 @@ Parallel Search finds ASCAP / BMI / related sources. Parallel Extract deep-reads
 
 ## Try it
 
-Live demo: *(add your hosted URL here)*
+**Live demo:** https://cueclear.vercel.app/
 
 Repo: https://github.com/buildwithtolu/cueclear
+
+### 60-second judge path
+
+1. Open the live demo (Mixed clearance sample loads by default).
+2. Click **Run rights clearance**.
+3. Watch the terminal: ADK invokes Parallel Search → Parallel Extract → Gemini grounds shares → Case A / B / unresolved.
+4. Open cue **Details** to see Search ID, Extract ID, provenance, and invoke mode.
+5. Sign off the pending Exit Music cue, then export Excel.
 
 ## Stack
 

@@ -9,10 +9,21 @@ Built for the Google Cloud **Agentic Cinema** hackathon · **Parallel** track
 ## What it does
 
 1. Ingests CMX 3600 `.edl` or Premiere / Final Cut `.xml`
-2. Uses Google ADK to call Parallel Search + Extract on PRO sources
-3. Uses Gemini to extract work IDs, writers, publishers, and shares
-4. Flags cleared, pending sign-off, and unresolved cues
-5. Exports Excel, CISAC XML, and JSON
+2. Google ADK calls `parallel_pro_search_tool` (Parallel Search + Extract on PRO sources)
+3. Gemini grounds work IDs, writers, publishers, and shares from Parallel text
+4. Google ADK calls `audit_and_reconcile_splits_tool` (dual-sided 100% writer/publisher check)
+5. Flags cleared, pending sign-off, and unresolved cues
+6. Exports Excel, CISAC XML, and JSON
+
+## Run locally
+
+```bash
+pip install -r requirements.txt
+# .env needs GEMINI_API_KEY and PARALLEL_API_KEY
+uvicorn backend.main:app --reload --port 8000
+```
+
+Open `http://127.0.0.1:8000`. Mixed clearance sample loads by default.
 
 ## Why Parallel
 

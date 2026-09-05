@@ -211,10 +211,25 @@ async def test_adk_uses_fresh_session_per_cue():
         return session
 
     async def fake_run_async(*, user_id, session_id, new_message):
+        from backend.agent.adk_orchestrator import audit_and_reconcile_splits_tool
+
         run_session_ids.append(session_id)
         text = ""
         if new_message and new_message.parts:
             text = getattr(new_message.parts[0], "text", "") or ""
+
+        if "audit_and_reconcile_splits_tool" in text:
+            writers_json = "[]"
+            publishers_json = "[]"
+            for line in text.splitlines():
+                if line.startswith("writers_json="):
+                    writers_json = line.split("=", 1)[1]
+                elif line.startswith("publishers_json="):
+                    publishers_json = line.split("=", 1)[1]
+            payload = audit_and_reconcile_splits_tool(writers_json, publishers_json)
+            yield _Event(_Content([_Part(_FR("audit_and_reconcile_splits_tool", payload))]))
+            return
+
         title = "Unknown"
         for line in text.splitlines():
             if line.startswith("track_title="):
@@ -222,6 +237,8 @@ async def test_adk_uses_fresh_session_per_cue():
                 break
         payload = await fake_search(title, "")
         yield _Event(_Content([_Part(_FR("parallel_pro_search_tool", payload))]))
+
+    assert len(list(agent.agent.tools)) == 2
 
     with patch.object(agent.session_service, "create_session", side_effect=tracking_create_session):
         with patch.object(agent.runner, "run_async", side_effect=fake_run_async):
@@ -251,11 +268,29 @@ async def test_adk_uses_fresh_session_per_cue():
     ]
     assert len(music_results) == 3
     assert all(e.data.get("invoke_mode") == "adk_runner" for e in music_results)
+
+    audit_results = [
+        e for e in events
+        if e.event_type == "reconciliation"
+        and e.data
+        and e.data.get("audit_invoke_mode") == "adk_runner"
+    ]
+    assert len(audit_results) == 3
     assert not any("[ADK_FALLBACK]" in (e.message or "") for e in events)
 
-    # Parent clearance session + one ADK session per music cue
-    assert len(created_session_ids) >= 4
+    # Parent clearance session + one search session and one audit session per music cue
     cue_sessions = [s for s in created_session_ids if "-cue-" in s]
+    audit_sessions = [s for s in created_session_ids if "-audit-" in s]
     assert len(cue_sessions) == 3
+    assert len(audit_sessions) == 3
     assert len(set(cue_sessions)) == 3
-    assert run_session_ids == cue_sessions
+    assert len(set(audit_sessions)) == 3
+    # Prefetch can interleave search/audit session order across cues.
+    assert len(run_session_ids) == 6
+    assert set(run_session_ids) == set(cue_sessions + audit_sessions)
+
+    complete = events[-1]
+    assert complete.event_type == "complete"
+    for cue in (complete.data or {}).get("cues") or []:
+        assert cue.get("invoke_mode") == "adk_runner"
+        assert cue.get("audit_invoke_mode") == "adk_runner"

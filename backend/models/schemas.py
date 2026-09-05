@@ -85,12 +85,14 @@ class ResolvedCue(BaseModel):
     signed_off_at: Optional[str] = None
     signed_off_by: Optional[str] = None
     invoke_mode: Optional[str] = None
+    audit_invoke_mode: Optional[str] = None
     provenance: Optional[str] = None
     excerpts: List[str] = []
     extract_id: Optional[str] = None
     extracted_urls: List[str] = []
     confidence_notes: Optional[str] = None
     fallback_reason: Optional[str] = None
+    audit_fallback_reason: Optional[str] = None
 
 class CueSheetManifest(BaseModel):
     project_title: str

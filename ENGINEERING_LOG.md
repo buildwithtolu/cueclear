@@ -3,7 +3,7 @@
 > Active source of truth for hackathon hardening. Updated as issues are identified and fixed.
 
 **Track:** Parallel (Google Cloud Agentic Cinema)  
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-05 (ADK audit tool wiring)
 
 ---
 
@@ -240,6 +240,21 @@ No open product P0/P1 items from the final-pass list.
 ---
 
 ## Change Records
+
+### 2026-09-05 — ADK split-audit tool + doc honesty
+
+**Issue:** ADK only owned Parallel Search. `audit_and_reconcile_splits_tool` existed but was unused by the Runner. `PROJECT_OVERVIEW.md` overclaimed that ADK invoked Gemini extract and audit tools.
+
+**Fix:**
+- Registered `audit_and_reconcile_splits_tool` on the ADK agent alongside `parallel_pro_search_tool`.
+- After deterministic Gemini extract, ADK invokes split audit per cue (fresh session; direct fallback labeled `[ADK_FALLBACK]`).
+- Cue schema/UI now surface `audit_invoke_mode` / `audit_fallback_reason`.
+- Docs/README/demo script aligned to the real hybrid pipeline: ADK Search → Gemini extract → ADK audit.
+- Added local run instructions to README.
+
+**Verification:** `test_adk_uses_fresh_session_per_cue` asserts both search and audit `adk_runner` paths (3+3 sessions).
+
+**Hackathon impact:** Stronger Technological Implementation without product drift.
 
 ### 2026-09-05 — ADK consistency + live latency + demo polish
 

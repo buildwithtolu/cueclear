@@ -66,11 +66,26 @@ def audit_and_reconcile_splits_tool(writers_json: str, publishers_json: str) -> 
         "flagged_issues": flags
     }
 
+def _holders_to_tool_json(holders: List[RightsHolder]) -> str:
+    """Serialize holders for audit_and_reconcile_splits_tool without inventing fields."""
+    payload = []
+    for h in holders:
+        payload.append({
+            "name": h.name,
+            "role": h.role,
+            "pro": h.pro,
+            "share": h.share,
+            "ipi_cae": h.ipi_cae,
+        })
+    return json.dumps(payload)
+
+
 class CueClearADKOrchestrator:
     """
     Hybrid clearance orchestrator:
-    - Google ADK Runner actually invokes Parallel Search as a tool per music cue
-    - Gemini structured extraction and dual-sided split audit remain deterministic
+    - Google ADK Runner invokes Parallel Search as a tool per music cue
+    - Gemini structured extraction stays deterministic (grounds from Parallel text)
+    - Google ADK Runner invokes dual-sided split audit as a second tool per cue
     """
     def __init__(self):
         gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -81,8 +96,8 @@ class CueClearADKOrchestrator:
         self.session_service = InMemorySessionService()
         self.adk_active = self.has_gemini
 
-        # ADK agent owns Parallel Search tool-calling. Extract + audit stay explicit.
-        # Prefer 3.6-flash, then aliases that remain available when free-tier quotas trip.
+        # ADK owns Parallel Search + split audit tool-calling.
+        # Gemini extract stays deterministic outside ADK for grounded JSON reliability.
         env_model = os.getenv("CUECLEAR_ADK_MODEL", "").strip()
         self.adk_model_candidates: List[str] = []
         if env_model:
@@ -92,12 +107,13 @@ class CueClearADKOrchestrator:
                 self.adk_model_candidates.append(model_name)
         self.adk_model = self.adk_model_candidates[0]
         self._adk_instruction = (
-            "You are CueClear's PRO search agent on Google ADK. "
-            "Each user message is an independent music cue with a fresh session. "
-            "Always call parallel_pro_search_tool exactly once for the current cue "
-            "with the provided track_title and artist. "
+            "You are CueClear's clearance agent on Google ADK. "
+            "You have exactly two tools: parallel_pro_search_tool and "
+            "audit_and_reconcile_splits_tool. "
+            "Each user message is an independent request with a fresh session. "
+            "Call only the single tool named in the user message, exactly once. "
             "Do not invent Work IDs, writers, publishers, or ownership shares. "
-            "After the tool returns, briefly confirm that search completed."
+            "After the tool returns, briefly confirm that the requested tool completed."
         )
         self._build_adk_runner(self.adk_model)
 
@@ -107,7 +123,7 @@ class CueClearADKOrchestrator:
             name="cueclear_adk_agent",
             model=model_name,
             instruction=self._adk_instruction,
-            tools=[parallel_pro_search_tool],
+            tools=[parallel_pro_search_tool, audit_and_reconcile_splits_tool],
         )
         self.runner = Runner(
             agent=self.agent,
@@ -251,14 +267,112 @@ class CueClearADKOrchestrator:
             reason = "ADK Runner unavailable; used direct Parallel Search"
         return result, "direct_tool_fallback", reason
 
+    async def _invoke_audit_via_adk(
+        self,
+        writers: List[RightsHolder],
+        publishers: List[RightsHolder],
+        clearance_session_id: str,
+        cue_number: int,
+    ) -> tuple[Dict[str, Any], str, Optional[str]]:
+        """
+        Prefer ADK Runner tool-calling for dual-sided split audit.
+        Falls back to direct audit_and_reconcile_splits_tool on ADK/Gemini failure.
+        Returns (result, invoke_mode, fallback_reason).
+        """
+        writers_json = _holders_to_tool_json(writers)
+        publishers_json = _holders_to_tool_json(publishers)
+
+        if not self.has_gemini:
+            result = audit_and_reconcile_splits_tool(writers_json, publishers_json)
+            return result, "direct_tool_fallback", "Gemini API key unavailable; ADK audit skipped"
+
+        message = types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    text=(
+                        f"Cue #{cue_number:02d} split audit request. "
+                        "Call audit_and_reconcile_splits_tool exactly once NOW.\n"
+                        f"writers_json={writers_json}\n"
+                        f"publishers_json={publishers_json}\n"
+                        "Do not invent or alter ownership shares. Pass the JSON arguments unchanged."
+                    )
+                )
+            ],
+        )
+
+        last_err: Optional[Exception] = None
+        for attempt in range(len(self.adk_model_candidates)):
+            audit_session_id = (
+                f"{clearance_session_id}-audit-{cue_number:03d}"
+                if attempt == 0
+                else f"{clearance_session_id}-audit-{cue_number:03d}-m{attempt}"
+            )
+            audit_session = await self.session_service.create_session(
+                app_name="cueclear_studio",
+                user_id="post_supervisor_1",
+                session_id=audit_session_id,
+            )
+            try:
+                tool_payload: Optional[Dict[str, Any]] = None
+                async for event in self.runner.run_async(
+                    user_id="post_supervisor_1",
+                    session_id=audit_session.id,
+                    new_message=message,
+                ):
+                    if not event.content or not event.content.parts:
+                        continue
+                    for part in event.content.parts:
+                        fr = getattr(part, "function_response", None)
+                        if fr is None or fr.name != "audit_and_reconcile_splits_tool":
+                            continue
+                        response = fr.response
+                        if isinstance(response, dict):
+                            tool_payload = response
+                        elif response is not None:
+                            tool_payload = dict(response)
+
+                if tool_payload is not None and "is_verified" in tool_payload:
+                    return {**tool_payload, "adk_model": self.adk_model}, "adk_runner", None
+
+                result = audit_and_reconcile_splits_tool(writers_json, publishers_json)
+                return (
+                    result,
+                    "direct_tool_fallback",
+                    "ADK Runner completed without an audit tool response; used direct split audit",
+                )
+            except Exception as adk_err:
+                last_err = adk_err
+                if self._rotate_adk_model(adk_err):
+                    continue
+                break
+            finally:
+                try:
+                    await self.session_service.delete_session(
+                        app_name="cueclear_studio",
+                        user_id="post_supervisor_1",
+                        session_id=audit_session.id,
+                    )
+                except Exception:
+                    pass
+
+        result = audit_and_reconcile_splits_tool(writers_json, publishers_json)
+        if last_err is not None:
+            err_name = type(last_err).__name__
+            err_text = " ".join(str(last_err).split())[:160]
+            reason = f"ADK Runner error ({err_name}: {err_text}); used direct split audit"
+        else:
+            reason = "ADK Runner unavailable; used direct split audit"
+        return result, "direct_tool_fallback", reason
+
     async def process_timeline_stream(
         self,
         clips: List[ParsedAudioClip],
         project_title: str = "Production Sequence"
     ) -> AsyncGenerator[AgentEvent, None]:
         """
-        Clears a timeline: ADK tool-calls Parallel Search per cue, then deterministic
-        Gemini extraction and split reconciliation, streaming progress events.
+        Clears a timeline: ADK tool-calls Parallel Search per cue, deterministic
+        Gemini extraction from Parallel text, then ADK tool-calls split audit.
         """
         session = await self.session_service.create_session(
             app_name="cueclear_studio",
@@ -270,7 +384,8 @@ class CueClearADKOrchestrator:
             timestamp=self._now(),
             message=(
                 f"[ADK_INIT] Clearance {session.id[:8]} ready. "
-                f"ADK model={self.adk_model}; fresh tool session per cue"
+                f"ADK model={self.adk_model}; tools=parallel_pro_search_tool,"
+                f"audit_and_reconcile_splits_tool; fresh session per tool call"
                 f"{'' if self.has_gemini else ' (Gemini unavailable: direct tool fallback)'}. "
                 f"Ingested {len(clips)} timeline clips."
             ),
@@ -281,6 +396,10 @@ class CueClearADKOrchestrator:
                 "adk_tool_calling": self.has_gemini,
                 "adk_session_policy": "per_cue",
                 "adk_model": self.adk_model,
+                "adk_tools": [
+                    "parallel_pro_search_tool",
+                    "audit_and_reconcile_splits_tool",
+                ],
             },
         )
 
@@ -496,12 +615,52 @@ class CueClearADKOrchestrator:
                     grounding_excerpts,
                 )
 
-                # Step 3: Deterministic dual-sided split audit
+                # Step 3: Dual-sided split audit via ADK tool-calling
                 yield AgentEvent(
                     event_type="reconciliation",
                     timestamp=self._now(),
-                    message="[SPLIT_AUDIT] Verifying dual-sided 100% writer & publisher split parity...",
+                    message=(
+                        "[ADK_TOOL] Invoking audit_and_reconcile_splits_tool "
+                        "for dual-sided 100% writer & publisher split parity..."
+                    ),
                     cue_number=cue_number,
+                )
+
+                audit_result, audit_invoke_mode, audit_fallback_reason = await self._invoke_audit_via_adk(
+                    extracted.writers,
+                    extracted.publishers,
+                    session.id,
+                    cue_number,
+                )
+
+                if audit_invoke_mode != "adk_runner" and audit_fallback_reason:
+                    yield AgentEvent(
+                        event_type="reasoning",
+                        timestamp=self._now(),
+                        message=f"[ADK_FALLBACK] {audit_fallback_reason}.",
+                        cue_number=cue_number,
+                        data={
+                            "invoke_mode": audit_invoke_mode,
+                            "fallback_reason": audit_fallback_reason,
+                            "tool": "audit_and_reconcile_splits_tool",
+                        },
+                    )
+
+                yield AgentEvent(
+                    event_type="reconciliation",
+                    timestamp=self._now(),
+                    message=(
+                        f"[SPLIT_AUDIT] via {audit_invoke_mode}: "
+                        f"verified={bool(audit_result.get('is_verified'))}; "
+                        f"writer_total={audit_result.get('total_writer_share')}; "
+                        f"publisher_total={audit_result.get('total_publisher_share')}."
+                    ),
+                    cue_number=cue_number,
+                    data={
+                        **audit_result,
+                        "audit_invoke_mode": audit_invoke_mode,
+                        "audit_fallback_reason": audit_fallback_reason,
+                    },
                 )
 
                 cue = ResolvedCue(
@@ -525,14 +684,17 @@ class CueClearADKOrchestrator:
                     latency_ms=pro_result.get("latency_ms"),
                     is_live_hit=pro_result.get("is_live_hit", True),
                     invoke_mode=invoke_mode,
+                    audit_invoke_mode=audit_invoke_mode,
                     provenance=provenance,
                     excerpts=list(pro_result.get("excerpts") or [])[:12],
                     extract_id=extract_id,
                     extracted_urls=list(extracted_urls)[:5],
                     confidence_notes=extracted.confidence_notes,
                     fallback_reason=fallback_reason,
+                    audit_fallback_reason=audit_fallback_reason,
                 )
 
+                # Authoritative cue state still comes from the same reconciler the ADK tool wraps.
                 is_verified, flags = validate_splits(cue)
                 resolved_cues.append(cue)
 
@@ -620,7 +782,7 @@ class CueClearADKOrchestrator:
             message=(
                 f"[CLEARANCE_COMPLETE] {manifest.cleared_cues}/{manifest.total_cues} cues cleared "
                 f"({manifest.compliance_score}% verified compliance). "
-                "Pipeline: ADK Parallel tool-call → Gemini extract → split audit."
+                "Pipeline: ADK Parallel Search → Gemini extract → ADK split audit."
             ),
             data=manifest.model_dump(),
         )

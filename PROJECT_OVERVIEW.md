@@ -4,7 +4,7 @@
 > **Repository Path:** `C:\Projects\cueclear`  
 > **Hackathon Event:** Google Cloud "Agentic Cinema" Summer Blockbuster Hackathon  
 > **Selected Partner Track:** Parallel Partner Track  
-> **Primary Technologies:** Google Cloud Agent Development Kit (`google-adk` 2.7.0, Gemini 3.6 Flash / 2.5 Flash), Parallel Search & Extraction API, FastAPI, Python 3.11+, Vanilla HTML5/CSS/JS
+> **Primary Technologies:** Google Cloud Agent Development Kit (`google-adk` 2.7.0, Gemini 3.6 Flash / flash-latest), Parallel Search & Extraction API (`parallel-web`), FastAPI, Python 3.11+, Vanilla HTML5/CSS/JS
 
 ---
 
@@ -20,13 +20,12 @@ In professional film, television, and commercial production, one of the most ted
 * Missing, unrepresented, or mismatched publisher splits delay distribution, risk copyright strikes, and block royalty payouts to composers.
 
 ### How CueClear Solves It
-CueClear replaces days of manual spreadsheet entry with a **60-second autonomous agentic workflow**:
+CueClear replaces days of manual spreadsheet entry with a single clearance workflow:
 1. **Ingests** industry-standard timeline files (CMX 3600 `.edl` and Final Cut Pro / Premiere `.xml`) across standard industry framerates (23.976p, 24p, 25p PAL, 29.97 NDF/DF) with video cut filtering and stereo pair deduplication.
-2. **Orchestrates** autonomous tool reasoning using the **Google Cloud Agent Development Kit (`google-adk`)** and Gemini structured outputs.
-3. **Autonomously Queries** live PRO databases via **Parallel's Search & Extraction API** (`api.parallel.ai/v1/search`) with exponential backoff retries and raw excerpt harvesting.
-4. **Grounds Rights Extraction** using Gemini structured outputs (`ExtractedPROData`), assigning `share: None` when percentages are undisclosed.
-5. **Reconciles Splits Dual-Sidedly** enforcing a strict 3-tier domain model (Case A: 100% Confirmed, Case B: Undisclosed Pending Sign-Off, Case C: Partial Publisher Claim) with zero artificial backfill in compliance scoring.
-6. **Exports Certified Deliverables** in **PMA/Network Excel (`.xlsx`)**, **CISAC Audio-Visual Cue XML (`.xml`)**, and **Audit JSON (`.json`)**.
+2. **ADK tool-calls Parallel Search** via `google-adk` `Runner` (`parallel_pro_search_tool` → official `parallel-web` Search + Extract).
+3. **Grounds rights** with Gemini structured outputs (`ExtractedPROData`) from Parallel excerpts only, assigning `share: None` when percentages are undisclosed.
+4. **ADK tool-calls split audit** via `audit_and_reconcile_splits_tool` (Case A confirmed / Case B undisclosed pending sign-off / Case C partial), with the same deterministic reconciler math underneath.
+5. **Exports** PMA/Network Excel (`.xlsx`), CISAC Audio-Visual Cue XML (`.xml`), and audit JSON (`.json`).
 
 ---
 
@@ -48,10 +47,10 @@ CueClear replaces days of manual spreadsheet entry with a **60-second autonomous
                ▼                               ▼
 ┌──────────────────────────────┐  ┌───────────────────────────┐
 │     Google Cloud ADK Agent   │  │     Parallel Web Tool     │
-│   (google-adk, Gemini 3.6)   │  │ (Live ASCAP & BMI Search) │
-│ • ADK Agent & Runner Loop    │  │ • 3x Exponential Backoff  │
-│ • Structured Output Grounding│  │ • Raw Excerpts Capture    │
-│ • 3-Tier Split Reconciler    │  │ • Latency & Search ID     │
+│   (google-adk + Gemini)      │  │ (Search + Extract SDK)    │
+│ • parallel_pro_search_tool   │  │ • Official parallel-web   │
+│ • audit_and_reconcile_splits │  │ • Search ID / Extract ID  │
+│ • Gemini extract (explicit)  │  │ • PRO URL deep-read       │
 └──────────────┬───────────────┘  └────────────┬──────────────┘
                │                               │
                └───────────────┬───────────────┘
@@ -215,6 +214,6 @@ Open your browser at **`http://127.0.0.1:8000`**.
 
 * **0:00 – 0:30 (The Problem):** Show an unorganized Premiere/DaVinci timeline with multiple music tracks. Explain that generating cue sheets requires days of manual database searches, risking unrepresented publisher splits and copyright rejection.
 * **0:30 – 0:50 (The Ingest):** Open the CueClear Studio Console. Drag and drop `sample_trailer.edl`. Show the detected audio cues.
-* **0:50 – 1:40 (ADK Agent in Action):** Click **"⚡ Run Autonomous Rights Clearance"**. Point to the live terminal feed showing the **Google ADK Runner** invoking `parallel_pro_search_tool` $\rightarrow$ querying ASCAP and Songview live with exact latency and `Search ID` displayed $\rightarrow$ invoking `extract_pro_rights_with_gemini` and `audit_and_reconcile_splits_tool`.
+* **0:50 – 1:40 (ADK Agent in Action):** Click **Run rights clearance**. Point to the live terminal: ADK invokes `parallel_pro_search_tool` (Parallel Search ID + Extract ID) → Gemini grounds writers/publishers from Parallel text → ADK invokes `audit_and_reconcile_splits_tool` for dual-sided 100% checks.
 * **1:40 – 2:20 (The Audit Modal & 3-Tier Classification):** Click on *Midnight City (M83)* (Emerald 100% Cleared) vs *Exit Music (Radiohead)* (Amber Pending Sign-Off) to demonstrate the industry-accurate 3-tier split model.
 * **2:20 – 3:00 (The Export):** Click **"⬇ Export Cue Sheet"** $\rightarrow$ open the downloaded **Excel (`.xlsx`)** workbook and **CISAC XML** file to prove delivery readiness.

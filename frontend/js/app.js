@@ -550,7 +550,10 @@ function renderCueMatrix() {
       provenanceBits.push(`<span class="tag-telemetry-chip provenance" title="Provenance">${escapeHtml(String(cue.provenance).replace(/_/g, ' '))}</span>`);
     }
     if (cue.invoke_mode) {
-      provenanceBits.push(`<span class="tag-telemetry-chip invoke" title="ADK invoke mode">${escapeHtml(cue.invoke_mode)}</span>`);
+      provenanceBits.push(`<span class="tag-telemetry-chip invoke" title="ADK Parallel Search invoke mode">S ${escapeHtml(cue.invoke_mode)}</span>`);
+    }
+    if (cue.audit_invoke_mode) {
+      provenanceBits.push(`<span class="tag-telemetry-chip invoke" title="ADK split audit invoke mode">A ${escapeHtml(cue.audit_invoke_mode)}</span>`);
     }
     if (cue.search_id) {
       provenanceBits.push(`<span class="tag-telemetry-chip idchip" title="Parallel Search ID">S ${escapeHtml(String(cue.search_id).slice(0, 10))}</span>`);
@@ -688,12 +691,14 @@ window.showSplitModal = function showSplitModal(cueNumber) {
 
     <div class="audit-box">
       <div><strong>Provenance:</strong> ${escapeHtml(cue.provenance || cue.source_type || 'Unknown')}</div>
-      <div><strong>Invoke mode:</strong> ${escapeHtml(cue.invoke_mode || '—')}</div>
+      <div><strong>Search invoke mode:</strong> ${escapeHtml(cue.invoke_mode || '—')}</div>
+      <div><strong>Audit invoke mode:</strong> ${escapeHtml(cue.audit_invoke_mode || '—')}</div>
       <div><strong>Parallel Search ID:</strong> ${escapeHtml(cue.search_id || '—')}${cue.latency_ms != null ? ` (${escapeHtml(cue.latency_ms)}ms)` : ''}</div>
       <div><strong>Parallel Extract ID:</strong> ${escapeHtml(cue.extract_id || '—')}</div>
       <div><strong>Extracted URLs:</strong> ${(cue.extracted_urls && cue.extracted_urls.length) ? escapeHtml(cue.extracted_urls.join(' | ')) : '—'}</div>
       <div><strong>Notes:</strong> ${escapeHtml(cue.confidence_notes || cue.source_reference || '—')}</div>
-      ${cue.fallback_reason ? `<div class="status-warn"><strong>ADK fallback:</strong> ${escapeHtml(cue.fallback_reason)}</div>` : ''}
+      ${cue.fallback_reason ? `<div class="status-warn"><strong>ADK search fallback:</strong> ${escapeHtml(cue.fallback_reason)}</div>` : ''}
+      ${cue.audit_fallback_reason ? `<div class="status-warn"><strong>ADK audit fallback:</strong> ${escapeHtml(cue.audit_fallback_reason)}</div>` : ''}
     </div>
 
     ${(cue.excerpts && cue.excerpts.length) ? `

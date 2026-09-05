@@ -269,10 +269,11 @@ No open product P0/P1 items from the final-pass list.
   - Prefetch events observed between cues
 - Hosted `https://cueclear.vercel.app/` still serves pre-change build until deploy/push.
 
+**Follow-up:** ADK model rotation now also treats Gemini `503` / `UNAVAILABLE` / high-demand errors as retriable (hosted Mixed Clearance had cue 1 fall back on 503 before this).
+
 **Remaining risks before Top 3:**
 - Gemini free-tier quotas on `gemini-3.6-flash` (~20/day) can force model rotation or `[ADK_FALLBACK]` during heavy local testing; production/demo keys should be paid or higher-limit.
 - Trailer video still missing.
-- Hosted deploy required before judges see ADK consistency + provenance chips.
 
 **Hackathon impact:** Direct Technological Implementation fix for ADK honesty + snappier demo; Design/Impact via unmistakable Parallel provenance on the happy path.
 

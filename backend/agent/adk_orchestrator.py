@@ -116,7 +116,7 @@ class CueClearADKOrchestrator:
         )
 
     def _rotate_adk_model(self, err: Exception) -> bool:
-        """Advance to the next ADK model candidate after 404/429. Returns True if rotated."""
+        """Advance to the next ADK model candidate after 404/429/503. Returns True if rotated."""
         err_l = str(err).lower()
         retriable = (
             "404" in err_l
@@ -124,6 +124,9 @@ class CueClearADKOrchestrator:
             or "no longer available" in err_l
             or "429" in err_l
             or "resource_exhausted" in err_l
+            or "503" in err_l
+            or "unavailable" in err_l
+            or "high demand" in err_l
         )
         if not retriable:
             return False

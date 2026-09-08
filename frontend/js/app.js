@@ -1,18 +1,30 @@
 // CueClear studio controller — clearance workflow only
 
+const STUDIO_STORAGE_KEY = 'cueclear_studio_v1';
+
 let currentCues = [];
+let currentClips = [];
+let currentProjectTitle = 'Production Sequence';
+let currentComplianceScore = null;
 let activeFilter = 'all';
 let isRunning = false;
 let sampleDataMap = {};
-let activeReelId = 'sample_mixed';
+let activeReelId = null;
 let hasTimelineLoaded = false;
 let hasClearanceResult = false;
-let activeEventSource = null;
+let activeStreamAbort = null;
+let streamCompletedCleanly = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   initUI();
-  await refreshHealth();
-  await loadSampleTimelines();
+  clearTerminal();
+  logTerminal('term-sys', 'Select a sample timeline or upload an EDL/XML file to begin.');
+  await refreshHealth({ quiet: true });
+  const restored = restoreStudioState();
+  await loadSampleTimelines({ skipAutoSelect: restored });
+  if (!restored && sampleDataMap.sample_mixed) {
+    await switchReel('sample_mixed');
+  }
 });
 
 function initUI() {
@@ -86,9 +98,24 @@ function initUI() {
 
   setExportEnabled(false);
   setResolveEnabled(false, 'Load a timeline first.');
+
+  ['exportExcel', 'exportCisac', 'exportJson'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('click', async (e) => {
+      if (!hasClearanceResult || !currentCues.length) return;
+      e.preventDefault();
+      const ok = await ensureServerManifest();
+      if (!ok) {
+        logTerminal('term-flagged', 'Could not sync cue sheet to server for export. Try running clearance again.');
+        return;
+      }
+      const href = e.currentTarget.getAttribute('href');
+      if (href) window.location.href = href;
+    });
+  });
 }
 
-async function refreshHealth() {
+async function refreshHealth(options = {}) {
+  const quiet = Boolean(options.quiet);
   const geminiEl = document.getElementById('healthGemini');
   const parallelEl = document.getElementById('healthParallel');
   try {
@@ -105,38 +132,33 @@ async function refreshHealth() {
         ? (data.parallel_search_configured ? 'CONNECTED' : 'NOT CONFIGURED')
         : 'AVAILABLE';
     }
-    clearTerminal();
-    logTerminal('term-sys', 'CueClear ready.');
-    if (hasDetail && !data.gemini_active) {
-      logTerminal('term-flagged', 'Gemini key not configured. Clearance can still run with offline catalog fallback.');
+    if (!quiet) {
+      clearTerminal();
+      logTerminal('term-sys', 'Select a sample timeline or upload an EDL/XML file to begin.');
     }
-    if (hasDetail && !data.parallel_search_configured) {
-      logTerminal('term-flagged', 'Parallel key not configured. Live Search/Extract unavailable until PARALLEL_API_KEY is set.');
-    }
-    if (hasDetail && data.gemini_active && data.parallel_search_configured) {
-      logTerminal('term-verified', 'Gemini and Parallel are connected.');
-    }
-    logTerminal('term-sys', 'Load a sample timeline or upload an EDL/XML file to begin.');
   } catch (err) {
     if (geminiEl) geminiEl.textContent = 'UNREACHABLE';
     if (parallelEl) parallelEl.textContent = 'UNREACHABLE';
-    clearTerminal();
-    logTerminal('term-flagged', `Could not reach API health endpoint: ${err.message}`);
+    if (!quiet) {
+      clearTerminal();
+      logTerminal('term-flagged', `Could not reach API health endpoint: ${err.message}`);
+    }
   }
 }
 
-async function loadSampleTimelines() {
+async function loadSampleTimelines(options = {}) {
   try {
     const res = await fetch('/api/sample-timelines', { credentials: 'same-origin' });
     const samples = await res.json();
     samples.forEach((s) => {
       sampleDataMap[s.id] = s;
     });
-
-    if (sampleDataMap.sample_mixed) {
-      await switchReel('sample_mixed');
-    } else if (sampleDataMap.sample_trailer) {
-      await switchReel('sample_trailer');
+    if (!options.skipAutoSelect) {
+      if (sampleDataMap.sample_mixed) {
+        await switchReel('sample_mixed');
+      } else if (sampleDataMap.sample_trailer) {
+        await switchReel('sample_trailer');
+      }
     }
   } catch (err) {
     logTerminal('term-flagged', `Failed to load sample timelines: ${err.message}`);
@@ -144,6 +166,11 @@ async function loadSampleTimelines() {
 }
 
 async function switchReel(reelId) {
+  if (isRunning) {
+    logTerminal('term-flagged', 'Clearance is still running. Wait for it to finish before switching samples.');
+    return;
+  }
+
   activeReelId = reelId;
   document.querySelectorAll('.btn-reel-select').forEach((b) => b.classList.remove('active'));
 
@@ -161,9 +188,13 @@ async function switchReel(reelId) {
 
   const sample = sampleDataMap[reelId];
   if (!sample) {
+    clearTerminal();
     logTerminal('term-flagged', `Sample "${reelId}" is not available.`);
     return;
   }
+
+  clearTerminal();
+  logTerminal('term-sys', `Loading sample: ${sample.name}…`);
 
   const formData = new FormData();
   formData.append('raw_content', sample.content);
@@ -179,24 +210,37 @@ async function switchReel(reelId) {
     const readyHint = reelId === 'sample_mixed'
       ? 'Recommended demo: Case A cleared · Case B pending · unresolved non-catalog.'
       : 'Ready to clear this timeline.';
-    applyTimelineMeta(data, readyHint);
-    resetClearanceState();
-    logTerminal('term-sys', `Loaded "${sample.name}" — ${data.total_clips} audio cue(s) detected.`);
+    applyTimelineMeta(data, readyHint, sample.name);
+    resetClearanceState({ persist: true });
+    clearTerminal();
+    logTerminal('term-sys', `Selected: ${sample.name}`);
+    logTerminal('term-sys', `${data.total_clips} audio cue(s) ready. Click Run rights clearance.`);
     if (reelId === 'sample_mixed') {
       logTerminal('term-sys', 'Demo path: Midnight City (Case A) → Exit Music (Case B) → Unknown cue (unresolved).');
     }
+    persistStudioState();
   } catch (err) {
+    clearTerminal();
     logTerminal('term-flagged', `Failed to ingest sample: ${err.message}`);
   }
 }
 
 async function handleFileUpload(file) {
+  if (isRunning) {
+    logTerminal('term-flagged', 'Clearance is still running. Wait for it to finish before uploading.');
+    return;
+  }
+
+  activeReelId = 'custom';
   document.querySelectorAll('.btn-reel-select').forEach((b) => b.classList.remove('active'));
   document.getElementById('btnReelCustom')?.classList.add('active');
 
   const ext = (file.name.split('.').pop() || 'FILE').toUpperCase();
   const activeLabel = document.getElementById('activeTimelineLabel');
   if (activeLabel) activeLabel.textContent = `${file.name} (.${ext.toLowerCase()})`;
+
+  clearTerminal();
+  logTerminal('term-sys', `Uploading ${file.name}…`);
 
   const formData = new FormData();
   formData.append('file', file);
@@ -209,22 +253,29 @@ async function handleFileUpload(file) {
       throw new Error(err.detail || `Upload failed (${res.status})`);
     }
     const data = await res.json();
-    applyTimelineMeta(data);
-    resetClearanceState();
-    logTerminal('term-pro', `Uploaded "${file.name}" — ${data.total_clips} audio cue(s) detected.`);
+    const projectTitle = file.name.replace(/\.[^/.]+$/, '');
+    applyTimelineMeta(data, 'Ready to clear this timeline.', projectTitle);
+    resetClearanceState({ persist: true });
+    clearTerminal();
+    logTerminal('term-pro', `Selected: ${file.name}`);
+    logTerminal('term-sys', `${data.total_clips} audio cue(s) ready. Click Run rights clearance.`);
+    persistStudioState();
   } catch (err) {
+    clearTerminal();
     logTerminal('term-flagged', `Timeline upload failed: ${err.message}`);
   }
 }
 
-function applyTimelineMeta(data, readyHint) {
-  hasTimelineLoaded = Number(data.total_clips || 0) > 0;
+function applyTimelineMeta(data, readyHint, projectTitle) {
+  currentClips = Array.isArray(data.clips) ? data.clips : [];
+  currentProjectTitle = projectTitle || data.project_title || currentProjectTitle || 'Production Sequence';
+  hasTimelineLoaded = currentClips.length > 0;
   document.getElementById('valClipCount').textContent = hasTimelineLoaded
-    ? `${data.total_clips} cue${data.total_clips === 1 ? '' : 's'}`
+    ? `${currentClips.length} cue${currentClips.length === 1 ? '' : 's'}`
     : '0 cues';
-  document.getElementById('valFps').textContent = hasTimelineLoaded ? `${deriveFps(data.clips)} fps` : '—';
+  document.getElementById('valFps').textContent = hasTimelineLoaded ? `${deriveFps(currentClips)} fps` : '—';
   document.getElementById('valDuration').textContent = hasTimelineLoaded
-    ? computeSequenceDuration(data.clips)
+    ? computeSequenceDuration(currentClips)
     : '—';
   setResolveEnabled(
     hasTimelineLoaded,
@@ -234,14 +285,88 @@ function applyTimelineMeta(data, readyHint) {
   );
 }
 
-function resetClearanceState() {
+function resetClearanceState(options = {}) {
   currentCues = [];
   hasClearanceResult = false;
+  currentComplianceScore = null;
   setExportEnabled(false);
   updateCompliance(null);
   renderCueMatrix();
   document.getElementById('topbarStatusVal').textContent = 'READY';
   document.getElementById('agentTelemetryPill').textContent = 'IDLE';
+  if (options.persist) persistStudioState();
+}
+
+function persistStudioState() {
+  try {
+    const activeLabel = document.getElementById('activeTimelineLabel');
+    const payload = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      activeReelId,
+      currentProjectTitle,
+      currentClips,
+      currentCues,
+      currentComplianceScore,
+      hasTimelineLoaded,
+      hasClearanceResult,
+      timelineLabel: activeLabel ? activeLabel.textContent : '',
+    };
+    localStorage.setItem(STUDIO_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_err) {
+    // Ignore quota / private-mode failures.
+  }
+}
+
+function restoreStudioState() {
+  try {
+    const raw = localStorage.getItem(STUDIO_STORAGE_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (!saved || !Array.isArray(saved.currentCues) || saved.currentCues.length === 0) {
+      return false;
+    }
+
+    activeReelId = saved.activeReelId || null;
+    currentProjectTitle = saved.currentProjectTitle || 'Production Sequence';
+    currentClips = Array.isArray(saved.currentClips) ? saved.currentClips : [];
+    currentCues = saved.currentCues;
+    currentComplianceScore = saved.currentComplianceScore;
+    hasTimelineLoaded = Boolean(saved.hasTimelineLoaded) || currentClips.length > 0;
+    hasClearanceResult = true;
+
+    document.querySelectorAll('.btn-reel-select').forEach((b) => b.classList.remove('active'));
+    if (activeReelId === 'sample_trailer') document.getElementById('btnReelTrailer')?.classList.add('active');
+    if (activeReelId === 'sample_indie') document.getElementById('btnReelIndie')?.classList.add('active');
+    if (activeReelId === 'sample_mixed') document.getElementById('btnReelMixed')?.classList.add('active');
+    if (activeReelId === 'custom') document.getElementById('btnReelCustom')?.classList.add('active');
+
+    const activeLabel = document.getElementById('activeTimelineLabel');
+    if (activeLabel && saved.timelineLabel) activeLabel.textContent = saved.timelineLabel;
+
+    document.getElementById('valClipCount').textContent = hasTimelineLoaded
+      ? `${currentClips.length || currentCues.length} cue(s)`
+      : '0 cues';
+    document.getElementById('valFps').textContent = currentClips.length ? `${deriveFps(currentClips)} fps` : '—';
+    document.getElementById('valDuration').textContent = currentClips.length
+      ? computeSequenceDuration(currentClips)
+      : '—';
+
+    updateCompliance(currentComplianceScore);
+    renderCueMatrix();
+    setExportEnabled(true);
+    setResolveEnabled(hasTimelineLoaded, 'Restored previous clearance. Run again anytime.');
+    document.getElementById('topbarStatusVal').textContent = 'CLEARED';
+    document.getElementById('agentTelemetryPill').textContent = 'IDLE';
+
+    clearTerminal();
+    logTerminal('term-verified', `Restored previous cue sheet (${currentCues.length} cues).`);
+    logTerminal('term-sys', `Project: ${currentProjectTitle}`);
+    logTerminal('term-sys', 'Select another sample to start fresh, or run clearance again.');
+    return true;
+  } catch (_err) {
+    return false;
+  }
 }
 
 function computeSequenceDuration(clips) {
@@ -259,17 +384,25 @@ function deriveFps(clips) {
   return Number(clips[0].fps || 24).toFixed(2);
 }
 
-function startClearanceStream() {
+async function startClearanceStream() {
   if (isRunning) return;
-  if (!hasTimelineLoaded) {
+  if (!hasTimelineLoaded || !currentClips.length) {
     logTerminal('term-flagged', 'Load a timeline before running clearance.');
     return;
   }
 
+  if (activeStreamAbort) {
+    activeStreamAbort.abort();
+    activeStreamAbort = null;
+  }
+
   isRunning = true;
+  streamCompletedCleanly = false;
   currentCues = [];
   hasClearanceResult = false;
+  currentComplianceScore = null;
   setExportEnabled(false);
+  updateCompliance(null);
   renderCueMatrix();
 
   const statusPill = document.getElementById('agentTelemetryPill');
@@ -284,35 +417,107 @@ function startClearanceStream() {
   }
   setResolveHelper('Clearance running. Watch the activity log for Parallel and Gemini steps.');
 
-  logTerminal('term-sys', 'Starting rights clearance…');
+  clearTerminal();
+  logTerminal('term-sys', `Starting rights clearance for ${currentProjectTitle}…`);
+  logTerminal('term-sys', `${currentClips.length} timeline cue(s) in this run.`);
 
-  if (activeEventSource) {
-    activeEventSource.close();
-    activeEventSource = null;
-  }
+  const controller = new AbortController();
+  activeStreamAbort = controller;
 
-  const eventSource = new EventSource('/api/stream-clearance');
-  activeEventSource = eventSource;
+  try {
+    const res = await fetch('/api/stream-clearance', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({
+        project_title: currentProjectTitle,
+        clips: currentClips,
+      }),
+      signal: controller.signal,
+    });
 
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      handleAgentEvent(data, eventSource);
-    } catch (e) {
-      console.error('SSE parse error', e);
+    if (!res.ok) {
+      let detail = `Clearance failed (${res.status})`;
+      try {
+        const errBody = await res.json();
+        detail = errBody.detail || detail;
+      } catch (_e) {
+        // ignore
+      }
+      throw new Error(detail);
     }
-  };
 
-  eventSource.onerror = () => {
-    if (!isRunning) return;
-    eventSource.close();
-    activeEventSource = null;
-    logTerminal('term-flagged', 'Clearance stream disconnected before completion.');
-    finishRun(false);
-  };
+    if (!res.body) {
+      throw new Error('Browser could not open a streaming response body.');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let splitAt = buffer.indexOf('\n\n');
+      while (splitAt !== -1) {
+        const rawEvent = buffer.slice(0, splitAt);
+        buffer = buffer.slice(splitAt + 2);
+        const dataLines = rawEvent
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart());
+        if (dataLines.length) {
+          try {
+            const payload = JSON.parse(dataLines.join('\n'));
+            handleAgentEvent(payload);
+          } catch (e) {
+            console.error('SSE parse error', e);
+          }
+        }
+        splitAt = buffer.indexOf('\n\n');
+      }
+    }
+
+    if (isRunning && !streamCompletedCleanly) {
+      if (currentCues.length > 0) {
+        hasClearanceResult = true;
+        setExportEnabled(true);
+        persistStudioState();
+        logTerminal('term-flagged', 'Stream ended early, but partial cue results were kept.');
+        finishRun(true);
+      } else {
+        logTerminal('term-flagged', 'Clearance stream disconnected before completion.');
+        finishRun(false);
+      }
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      return;
+    }
+    if (isRunning) {
+      logTerminal('term-flagged', `Clearance stream error: ${err.message || err}`);
+      if (currentCues.length > 0) {
+        hasClearanceResult = true;
+        setExportEnabled(true);
+        persistStudioState();
+        finishRun(true);
+      } else {
+        finishRun(false);
+      }
+    }
+  } finally {
+    if (activeStreamAbort === controller) {
+      activeStreamAbort = null;
+    }
+  }
 }
 
-function handleAgentEvent(event, eventSource) {
+function handleAgentEvent(event) {
   const timeStr = event.timestamp ? `[${event.timestamp}] ` : '';
 
   switch (event.event_type) {
@@ -340,6 +545,7 @@ function handleAgentEvent(event, eventSource) {
     case 'complete':
       logTerminal('term-verified', `${timeStr}${event.message}`);
       if (event.data) {
+        currentComplianceScore = event.data.compliance_score;
         updateCompliance(event.data.compliance_score);
         if (Array.isArray(event.data.cues) && event.data.cues.length) {
           currentCues = event.data.cues;
@@ -348,10 +554,8 @@ function handleAgentEvent(event, eventSource) {
       }
       hasClearanceResult = currentCues.length > 0;
       setExportEnabled(hasClearanceResult);
-      if (eventSource) {
-        eventSource.close();
-        activeEventSource = null;
-      }
+      streamCompletedCleanly = true;
+      persistStudioState();
       finishRun(true);
       break;
     default:
@@ -367,6 +571,7 @@ function addOrUpdateCue(cueData) {
     currentCues.push(cueData);
   }
   renderCueMatrix();
+  persistStudioState();
 }
 
 function finishRun(success) {
@@ -376,7 +581,7 @@ function finishRun(success) {
   const btnResolve = document.getElementById('btnResolveRights');
 
   if (statusPill) statusPill.textContent = 'IDLE';
-  if (topbarStatus) topbarStatus.textContent = success ? 'CLEARED' : 'READY';
+  if (topbarStatus) topbarStatus.textContent = success && hasClearanceResult ? 'CLEARED' : 'READY';
   if (btnResolve) {
     btnResolve.disabled = !hasTimelineLoaded;
     btnResolve.textContent = 'Run rights clearance again';
@@ -386,6 +591,7 @@ function finishRun(success) {
       ? 'Inspect cues below. Pending items can be signed off before export.'
       : 'Load a timeline, then run clearance.'
   );
+  persistStudioState();
 }
 
 function setResolveEnabled(enabled, helperText) {
@@ -730,6 +936,12 @@ window.confirmSplitSignOff = async function confirmSplitSignOff(cueNumber) {
   if (!cue) return;
 
   try {
+    const synced = await ensureServerManifest();
+    if (!synced) {
+      logTerminal('term-flagged', 'Could not sync cue sheet before sign-off. Try again.');
+      return;
+    }
+
     const res = await fetch('/api/sign-off', {
       method: 'POST',
       credentials: 'same-origin',
@@ -749,9 +961,11 @@ window.confirmSplitSignOff = async function confirmSplitSignOff(cueNumber) {
     const manifest = await res.json();
     currentCues = manifest.cues || [];
     hasClearanceResult = currentCues.length > 0;
+    currentComplianceScore = manifest.compliance_score ?? 0;
     setExportEnabled(hasClearanceResult);
-    updateCompliance(manifest.compliance_score ?? 0);
+    updateCompliance(currentComplianceScore);
     renderCueMatrix();
+    persistStudioState();
 
     logTerminal(
       'term-verified',
@@ -763,3 +977,27 @@ window.confirmSplitSignOff = async function confirmSplitSignOff(cueNumber) {
     logTerminal('term-flagged', `Sign-off request failed: ${err.message}`);
   }
 };
+
+async function ensureServerManifest() {
+  if (!currentCues.length) return false;
+  try {
+    const total = currentCues.length;
+    const cleared = currentCues.filter((c) => c.is_verified).length;
+    const res = await fetch('/api/restore-manifest', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_title: currentProjectTitle || 'Production Sequence',
+        cues: currentCues,
+        total_cues: total,
+        cleared_cues: cleared,
+        flagged_cues: total - cleared,
+        compliance_score: currentComplianceScore ?? (total ? Math.round((cleared / total) * 1000) / 10 : 100),
+      }),
+    });
+    return res.ok;
+  } catch (_err) {
+    return false;
+  }
+}

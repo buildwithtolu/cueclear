@@ -106,6 +106,72 @@ def test_stream_requires_uploaded_timeline():
     assert res.status_code == 400
 
 
+def test_stream_post_requires_clips():
+    fresh = TestClient(app)
+    res = fresh.post("/api/stream-clearance", json={"project_title": "Empty", "clips": []})
+    assert res.status_code == 400
+
+
+def test_stream_post_and_restore_manifest(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("GOOGLE_API_KEY", "")
+    monkeypatch.setenv("PARALLEL_API_KEY", "")
+    monkeypatch.setattr("backend.agent.parallel_tool.PARALLEL_API_KEY", "")
+    monkeypatch.setattr("backend.main.agent.has_gemini", False)
+
+    with open("samples/sample_mixed_clearance.edl", "rb") as edl_file:
+        upload_res = client.post(
+            "/api/upload-timeline",
+            data={"file_type": "edl", "project_title": "Mixed Stream"},
+            files={"file": ("mixed.edl", edl_file, "text/plain")},
+        )
+    assert upload_res.status_code == 200
+    clips = upload_res.json()["clips"]
+
+    stream_res = client.post(
+        "/api/stream-clearance",
+        json={"project_title": "Mixed Stream", "clips": clips},
+    )
+    assert stream_res.status_code == 200
+    assert "text/event-stream" in stream_res.headers.get("content-type", "")
+    assert "CLEARANCE_COMPLETE" in stream_res.text
+    assert "data:" in stream_res.text
+
+    # Simulate a fresh serverless instance with the same browser cookie but empty memory,
+    # then restore manifest from the client and export.
+    sid = stream_res.cookies.get("cueclear_sid") or upload_res.cookies.get("cueclear_sid")
+    assert sid
+    # Build a tiny manifest and restore it
+    pending = ResolvedCue(
+        cue_number=1,
+        title="Midnight City",
+        artist="M83",
+        usage_type=UsageType.BI,
+        timecode_in="00:00:00:00",
+        timecode_out="00:00:40:00",
+        duration_frames=960,
+        duration_timecode="00:00:40:00",
+        writers=[RightsHolder(name="Anthony Gonzalez", share=100.0, pro="SACEM")],
+        publishers=[RightsHolder(name="Delphic Music", share=100.0, pro="ASCAP")],
+    )
+    validate_splits(pending)
+    SESSIONS.pop(sid, None)
+    restore = client.post(
+        "/api/restore-manifest",
+        json={
+            "project_title": "Mixed Stream",
+            "cues": [pending.model_dump()],
+            "total_cues": 1,
+            "cleared_cues": 1,
+            "flagged_cues": 0,
+            "compliance_score": 100.0,
+        },
+    )
+    assert restore.status_code == 200
+    excel = client.get("/api/export/excel")
+    assert excel.status_code == 200
+
+
 def test_sessions_are_isolated(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("GOOGLE_API_KEY", "")

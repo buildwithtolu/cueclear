@@ -241,6 +241,24 @@ No open product P0/P1 items from the final-pass list.
 
 ## Change Records
 
+### 2026-09-05 — Clearance stream stability + cue-sheet persistence
+
+**Issues:** Hosted Mixed runs showed “Clearance stream disconnected before completion,” cue sheet wiped mid-run / on refresh, and terminal noise before a sample was selected.
+
+**Root causes:**
+1. `EventSource.onerror` raced with clean `complete` close and called `finishRun(false)`.
+2. GET SSE relied on in-memory session clips, which is not sticky across Vercel serverless instances.
+3. No client persistence for completed cue sheets.
+
+**Fix:**
+- Switch clearance to `POST /api/stream-clearance` with clips in the body (fetch stream reader).
+- Terminal only logs the selected sample / active run.
+- Persist cue sheet + timeline in `localStorage` and restore on refresh.
+- `POST /api/restore-manifest` before export/sign-off so serverless sessions can be rehydrated.
+- Keep `samples/` in the Vercel function bundle.
+
+**Verification:** `tests/test_api.py` 11 passed including POST stream + restore-manifest export path.
+
 ### 2026-09-05 — ADK split-audit tool + doc honesty
 
 **Issue:** ADK only owned Parallel Search. `audit_and_reconcile_splits_tool` existed but was unused by the Runner. `PROJECT_OVERVIEW.md` overclaimed that ADK invoked Gemini extract and audit tools.

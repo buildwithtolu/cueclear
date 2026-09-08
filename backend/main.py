@@ -237,6 +237,29 @@ async def upload_timeline(
     }
 
 
+def _sse_headers() -> dict:
+    return {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+
+
+def _stream_clearance_events(session: SessionState, clips: List[ParsedAudioClip], project_title: str):
+    async def event_generator():
+        async for agent_event in agent.process_timeline_stream(clips, project_title):
+            if agent_event.event_type == "complete" and agent_event.data:
+                session.manifest = CueSheetManifest(**agent_event.data)
+            payload = json.dumps(agent_event.model_dump())
+            yield f"data: {payload}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
+
+
 @app.post("/api/run-clearance")
 async def run_clearance(payload: ClearanceRunRequest, request: Request, response: Response):
     _enforce_rate_limit(request)
@@ -254,13 +277,74 @@ async def run_clearance(payload: ClearanceRunRequest, request: Request, response
     return manifest.model_dump()
 
 
+@app.get("/api/session-manifest")
+async def get_session_manifest(request: Request, response: Response):
+    """Return the current session cue-sheet manifest if one exists (best-effort on serverless)."""
+    session = _get_session(request, response)
+    if not session.manifest:
+        return JSONResponse(content={"manifest": None, "has_clips": bool(session.clips)})
+    return {
+        "manifest": session.manifest.model_dump(),
+        "has_clips": bool(session.clips),
+        "clip_count": len(session.clips),
+    }
+
+
+@app.post("/api/restore-manifest")
+async def restore_manifest(payload: CueSheetManifest, request: Request, response: Response):
+    """
+    Rehydrate the server session manifest from the browser.
+    Needed on serverless hosts where in-memory sessions are not sticky across invocations.
+    """
+    session = _get_session(request, response)
+    if not payload.cues:
+        raise HTTPException(status_code=400, detail="Manifest has no cues to restore.")
+    session.manifest = payload
+    session.manifest.total_cues = len(payload.cues)
+    session.manifest.cleared_cues = sum(1 for c in payload.cues if c.is_verified)
+    session.manifest.flagged_cues = session.manifest.total_cues - session.manifest.cleared_cues
+    total = session.manifest.total_cues
+    if not payload.compliance_score and total:
+        session.manifest.compliance_score = round(
+            (session.manifest.cleared_cues / total * 100.0),
+            1,
+        )
+    return session.manifest.model_dump()
+
+
+@app.post("/api/stream-clearance")
+async def stream_clearance_post(
+    payload: ClearanceRunRequest,
+    request: Request,
+    response: Response,
+):
+    """
+    Preferred SSE stream: client sends clips in the POST body so clearance does not
+    depend on sticky in-memory session affinity across serverless instances.
+    """
+    _enforce_rate_limit(request)
+    session = _get_session(request, response)
+
+    if not payload.clips:
+        raise HTTPException(status_code=400, detail="No timeline clips provided.")
+
+    if len(payload.clips) > MAX_CUES_PER_RUN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many cues in one run. Max is {MAX_CUES_PER_RUN}.",
+        )
+
+    session.clips = list(payload.clips)
+    return _stream_clearance_events(session, list(payload.clips), payload.project_title)
+
+
 @app.get("/api/stream-clearance")
 async def stream_clearance(
     request: Request,
     response: Response,
     project_title: str = "Production Sequence",
 ):
-    """Server-Sent Events endpoint streaming live agent reasoning and Parallel tool actions."""
+    """Legacy SSE stream using session-stored clips (may fail across serverless instances)."""
     _enforce_rate_limit(request)
     session = _get_session(request, response)
 
@@ -276,16 +360,7 @@ async def stream_clearance(
             detail=f"Too many cues in one run. Max is {MAX_CUES_PER_RUN}.",
         )
 
-    clips = list(session.clips)
-
-    async def event_generator():
-        async for agent_event in agent.process_timeline_stream(clips, project_title):
-            if agent_event.event_type == "complete" and agent_event.data:
-                session.manifest = CueSheetManifest(**agent_event.data)
-            payload = json.dumps(agent_event.model_dump())
-            yield f"data: {payload}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return _stream_clearance_events(session, list(session.clips), project_title)
 
 
 @app.post("/api/sign-off")

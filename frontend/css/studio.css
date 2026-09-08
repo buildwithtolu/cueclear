@@ -467,28 +467,58 @@ body.studio-body {
 .notice-bad { border-color: var(--accent-red); background: rgba(220, 38, 38, 0.06); }
 .notice-ok { border-color: #059669; background: rgba(5, 150, 105, 0.08); }
 
-.audit-box,
-.excerpts-box {
+.audit-box {
   border: var(--border-grid);
   padding: 10px 12px;
   background: var(--swiss-offwhite);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
 .excerpts-box {
-  max-height: 140px;
-  overflow: auto;
+  border: var(--border-grid);
+  padding: 14px 16px;
   background: var(--swiss-white);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--swiss-black);
+  max-height: min(42vh, 360px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.excerpts-box > strong {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: var(--border-grid);
 }
 
 .excerpts-box ol {
-  margin: 8px 0 0 16px;
+  margin: 0 0 0 18px;
+  padding: 0;
 }
 
 .excerpts-box li {
-  margin-bottom: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.excerpts-box li:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .modal-actions {
@@ -802,7 +832,7 @@ body.studio-body {
   background: var(--swiss-white);
   border: var(--border-grid-heavy);
   width: 100%;
-  max-width: 680px;
+  max-width: 760px;
   display: flex;
   flex-direction: column;
 }
@@ -1215,6 +1245,12 @@ body.studio-body {
     max-height: calc(100dvh - 56px);
     padding: 14px;
   }
+
+  .excerpts-box {
+    max-height: min(48vh, 420px);
+    font-size: 13px;
+    padding: 12px 14px;
+  }
 }
 
 /* Standard phones: 390×844, 375×812, 375×667 */
@@ -1409,6 +1445,16 @@ body.studio-body {
   .swiss-modal-body {
     padding: 12px 10px;
     gap: 12px;
+  }
+
+  .excerpts-box {
+    max-height: min(50vh, 380px);
+    font-size: 12.5px;
+    padding: 12px;
+  }
+
+  .excerpts-box > strong {
+    font-size: 10.5px;
   }
 }
 

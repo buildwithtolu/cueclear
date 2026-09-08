@@ -911,7 +911,11 @@ window.showSplitModal = function showSplitModal(cueNumber) {
       <div class="excerpts-box">
         <strong>Parallel excerpts used for grounding</strong>
         <ol>
-          ${cue.excerpts.slice(0, 6).map((ex) => `<li>${escapeHtml(String(ex).slice(0, 280))}</li>`).join('')}
+          ${cue.excerpts.slice(0, 8).map((ex) => {
+            const text = String(ex || '').replace(/\s+/g, ' ').trim();
+            const clipped = text.length > 700 ? `${text.slice(0, 700)}…` : text;
+            return `<li>${escapeHtml(clipped)}</li>`;
+          }).join('')}
         </ol>
       </div>
     ` : ''}

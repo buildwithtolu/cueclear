@@ -653,6 +653,148 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+const EXCERPT_CHROME_PATTERNS = [
+  /please select title/gi,
+  /songview logo/gi,
+  /tailor your search for the info you want/gi,
+  /more detailed information with songview technology[\s\S]{0,240}/gi,
+  /with songview technology integrated into the search tools[\s\S]{0,280}/gi,
+  /update:\s*songview is expanding[\s\S]{0,260}/gi,
+  /the four major u\.?s\.? pros[\s\S]{0,260}/gi,
+  /title performer writer\/composer publisher bmi work id iswc/gi,
+  /see a combined view of more than[\s\S]{0,200}/gi,
+  /see the ownership of all musical works covered under a bmi license[\s\S]{0,200}/gi,
+];
+
+function cleanExcerptText(raw) {
+  let text = String(raw || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+
+  EXCERPT_CHROME_PATTERNS.forEach((pattern) => {
+    text = text.replace(pattern, ' ');
+  });
+
+  text = text
+    .replace(/\b(Title|Performer|Writer\/Composer|Publisher|BMI Work ID|ISWC)\b(?:\s+\1\b){1,6}/gi, '$1')
+    .replace(/\s+/g, ' ')
+    .replace(/\s([,.;:])/g, '$1')
+    .trim();
+
+  return text;
+}
+
+function scoreExcerptText(text, cueTitle) {
+  const lower = text.toLowerCase();
+  let score = 0;
+  const signals = [
+    'iswc', 'work id', 'bmi', 'ascap', 'songview', 'writer', 'composer',
+    'publisher', 'share', 'repertory', 'undisclosed', 'ipi',
+  ];
+  signals.forEach((signal) => {
+    if (lower.includes(signal)) score += 3;
+  });
+  if (/\d+(\.\d+)?\s*%/.test(text)) score += 4;
+  if (/t-\d{3}\.\d{3}\.\d{3}-\d/i.test(text)) score += 5;
+  if (cueTitle) {
+    const titleToken = String(cueTitle).toLowerCase().slice(0, 18);
+    if (titleToken && lower.includes(titleToken)) score += 4;
+  }
+  if (lower.includes('wikiwand') || lower.includes('romeo + juliet')) score -= 2;
+  if (lower.includes('please select') || lower.includes('logo')) score -= 4;
+  // Prefer denser evidence snippets over giant page dumps.
+  if (text.length > 900) score -= 2;
+  if (text.length < 40) score -= 3;
+  return score;
+}
+
+function prepareExcerptsForDisplay(excerpts, cueTitle) {
+  const cleaned = (excerpts || [])
+    .map((ex) => cleanExcerptText(ex))
+    .filter((text) => text.length >= 24);
+
+  const deduped = [];
+  cleaned.forEach((text) => {
+    const key = text.slice(0, 120).toLowerCase();
+    if (!deduped.some((existing) => existing.slice(0, 120).toLowerCase() === key)) {
+      deduped.push(text);
+    }
+  });
+
+  return deduped
+    .map((text) => {
+      const clipped = text.length > 1400 ? `${text.slice(0, 1400).trim()}…` : text;
+      return { text: clipped, score: scoreExcerptText(clipped, cueTitle) };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((item) => item.text);
+}
+
+let activeExcerptStore = [];
+
+function renderExcerptsHtml(excerpts, cueTitle) {
+  const prepared = prepareExcerptsForDisplay(excerpts, cueTitle);
+  activeExcerptStore = prepared;
+  if (!prepared.length) {
+    return `
+      <div class="excerpts-box">
+        <strong>Parallel excerpts used for grounding</strong>
+        <span class="excerpts-box-hint">No clean PRO evidence snippets were available for this cue.</span>
+      </div>
+    `;
+  }
+
+  const previewLimit = 220;
+  const items = prepared.map((fullText, index) => {
+    const needsToggle = fullText.length > previewLimit;
+    const preview = needsToggle ? `${fullText.slice(0, previewLimit).trim()}…` : fullText;
+    return `
+      <li class="excerpt-item ${needsToggle ? 'is-collapsed' : 'is-expanded'}" data-excerpt-index="${index}">
+        <span class="excerpt-item-label">Evidence snippet</span>
+        <div class="excerpt-item-text">${escapeHtml(preview)}</div>
+        ${needsToggle ? `
+          <button class="excerpt-toggle" type="button" onclick="toggleExcerptExpand(this)">Read more</button>
+        ` : ''}
+      </li>
+    `;
+  }).join('');
+
+  return `
+    <div class="excerpts-box">
+      <strong>Parallel excerpts used for grounding</strong>
+      <span class="excerpts-box-hint">Cleaned PRO evidence first. Use Read more for the full snippet.</span>
+      <ol>${items}</ol>
+    </div>
+  `;
+}
+
+window.toggleExcerptExpand = function toggleExcerptExpand(button) {
+  const item = button?.closest('.excerpt-item');
+  const textEl = item?.querySelector('.excerpt-item-text');
+  if (!item || !textEl) return;
+
+  const index = Number(item.dataset.excerptIndex);
+  const fullText = activeExcerptStore[index] || '';
+  if (!fullText) return;
+
+  const expanding = item.classList.contains('is-collapsed');
+  if (expanding) {
+    item.classList.remove('is-collapsed');
+    item.classList.add('is-expanded');
+    textEl.textContent = fullText;
+    button.textContent = 'Show less';
+  } else {
+    item.classList.add('is-collapsed');
+    item.classList.remove('is-expanded');
+    const previewLimit = 220;
+    textEl.textContent = `${fullText.slice(0, previewLimit).trim()}…`;
+    button.textContent = 'Read more';
+  }
+};
+
 function renderCueMatrix() {
   const tbody = document.getElementById('matrixTableBody');
   if (!tbody) return;
@@ -907,18 +1049,7 @@ window.showSplitModal = function showSplitModal(cueNumber) {
       ${cue.audit_fallback_reason ? `<div class="status-warn"><strong>ADK audit fallback:</strong> ${escapeHtml(cue.audit_fallback_reason)}</div>` : ''}
     </div>
 
-    ${(cue.excerpts && cue.excerpts.length) ? `
-      <div class="excerpts-box">
-        <strong>Parallel excerpts used for grounding</strong>
-        <ol>
-          ${cue.excerpts.slice(0, 8).map((ex) => {
-            const text = String(ex || '').replace(/\s+/g, ' ').trim();
-            const clipped = text.length > 700 ? `${text.slice(0, 700)}…` : text;
-            return `<li>${escapeHtml(clipped)}</li>`;
-          }).join('')}
-        </ol>
-      </div>
-    ` : ''}
+    ${(cue.excerpts && cue.excerpts.length) ? renderExcerptsHtml(cue.excerpts, cue.title) : ''}
 
     <div class="modal-actions">
       ${needsSignOff ? `
